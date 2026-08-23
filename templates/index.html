@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Weight Log</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <main>
+    <h1>Weight Log</h1>
+
+    <section aria-label="Most recent weight">
+      {% if latest %}
+        <p class="latest">
+          <span class="latest-value">{{ latest["weight_lbs"] }} lbs</span>
+          <span class="latest-date">as of {{ latest["entry_date"] }}</span>
+        </p>
+      {% else %}
+        <p class="latest">No weight logged yet.</p>
+      {% endif %}
+    </section>
+
+    <form method="post" action="{{ url_for('log_weight') }}">
+      <label for="weight_lbs">Today's weight (lbs)</label>
+      <input
+        type="number"
+        id="weight_lbs"
+        name="weight_lbs"
+        step="0.1"
+        min="0"
+        required
+        autofocus
+      >
+      <button type="submit">Log weight</button>
+    </form>
+  </main>
+</body>
+</html>
