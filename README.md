@@ -31,4 +31,12 @@ The SQLite database (`food_log.db`) and its tables are created automatically on 
 
 ## Environment variables
 
-Not required yet — Phase 1 (weight logging) has no external API calls. Starting in Phase 2, an `ANTHROPIC_API_KEY` will be needed for food-entry parsing; it will go in a gitignored `.env` file.
+Create a `.env` file (gitignored, copy from `.env.example`) with:
+
+```
+ANTHROPIC_API_KEY=your-key-here
+```
+
+Used by the `/food` chat route to parse food entries via the Claude API. Weight logging (`/`) doesn't need it.
+
+`FOOD_LOG_DB_PATH` (optional) overrides the SQLite file path — useful for pointing at a scratch database while testing instead of the real `food_log.db`.

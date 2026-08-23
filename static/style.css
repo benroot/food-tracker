@@ -20,6 +20,81 @@ body {
   line-height: 1.5;
 }
 
+nav {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+nav a {
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+nav a:hover,
+nav a:focus-visible {
+  text-decoration: underline;
+}
+
+.flashes {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 1.5rem;
+}
+
+.flash {
+  padding: 0.5rem 0.75rem;
+  border-radius: 4px;
+  margin-bottom: 0.5rem;
+}
+
+.flash-success {
+  background: #e6f4ea;
+  color: #1e4620;
+}
+
+.flash-error {
+  background: #fdecea;
+  color: #611a15;
+}
+
+.pending-question {
+  font-weight: 600;
+  padding: 0.5rem 0.75rem;
+  border-left: 3px solid var(--accent);
+  margin-bottom: 1rem;
+}
+
+.total {
+  font-weight: 400;
+  color: #444;
+  font-size: 1rem;
+  margin-left: 0.5rem;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 1rem;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 0.4rem 0.5rem;
+  border-bottom: 1px solid #ddd;
+}
+
+.estimate-tag {
+  font-size: 0.75rem;
+  color: #666;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  padding: 0 0.25rem;
+  margin-left: 0.25rem;
+}
+
 .latest {
   font-size: 1.25rem;
   margin-bottom: 2rem;
@@ -38,7 +113,7 @@ form {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-  max-width: 16rem;
+  max-width: 24rem;
 }
 
 label {

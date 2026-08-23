@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Food Log{% endblock %}
+{% block content %}
+  <h1>Food Log</h1>
+
+  {% if pending_question %}
+    <p class="pending-question" role="status">{{ pending_question }}</p>
+  {% endif %}
+
+  <form method="post" action="{{ url_for('food_log') }}">
+    <label for="message">
+      {% if pending_question %}Your answer{% else %}What did you eat?{% endif %}
+    </label>
+    <input
+      type="text"
+      id="message"
+      name="message"
+      placeholder="e.g. two eggs and toast for breakfast"
+      required
+      autofocus
+    >
+    <button type="submit">Send</button>
+  </form>
+
+  <section aria-label="Today's entries">
+    <h2>Today <span class="total">{{ total_calories }} cal</span></h2>
+    {% if entries %}
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">Time</th>
+            <th scope="col">Meal</th>
+            <th scope="col">Item</th>
+            <th scope="col">Calories</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for entry in entries %}
+            <tr>
+              <td>{{ entry["entry_time"] }}</td>
+              <td>{{ entry["meal_type"] }}</td>
+              <td>
+                {{ entry["description"] }}
+                {% if entry["quantity"] %}({{ entry["quantity"] }}){% endif %}
+                {% if entry["is_estimate"] %}<span class="estimate-tag" title="{{ entry['assumption_note'] or 'Estimated' }}">est.</span>{% endif %}
+              </td>
+              <td>{{ entry["calories"] }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p>No food logged yet today.</p>
+    {% endif %}
+  </section>
+{% endblock %}
