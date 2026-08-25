@@ -9,6 +9,8 @@ from config import load_env_file
 
 load_env_file()
 
+MEAL_TYPES = ("Breakfast", "Lunch", "Dinner", "Snack", "Dessert", "Drink")
+
 app = Flask(__name__)
 app.secret_key = secrets.token_hex(32)
 
@@ -64,6 +66,7 @@ def food_page():
         entries=entries,
         total_calories=total_calories,
         pending_question=session.get("pending_question"),
+        meal_types=MEAL_TYPES,
     )
 
 
@@ -123,6 +126,44 @@ def food_log():
         f'{item["food"]} ({item["estimated_calories"]} cal)' for item in tool_input["items"]
     )
     flash(f'Logged to {tool_input["meal_type"]}: {summary}', "success")
+    return redirect(url_for("food_page"))
+
+
+@app.route("/food/log-direct", methods=["POST"])
+def food_log_direct():
+    food = request.form.get("food", "").strip()
+    calories_raw = request.form.get("calories", "").strip()
+    meal_type = request.form.get("meal_type", "").strip()
+
+    if not food or meal_type not in MEAL_TYPES:
+        flash("Enter a food label and pick a meal.", "error")
+        return redirect(url_for("food_page"))
+
+    try:
+        calories = int(calories_raw)
+        if calories <= 0:
+            raise ValueError
+    except ValueError:
+        flash("Calories must be a whole number greater than 0.", "error")
+        return redirect(url_for("food_page"))
+
+    db = dbmod.get_db()
+    now = datetime.now()
+    cursor = db.execute(
+        "INSERT INTO log_entries (entry_date, entry_time, meal_type) VALUES (?, ?, ?)",
+        (now.date().isoformat(), now.strftime("%H:%M"), meal_type),
+    )
+    db.execute(
+        """
+        INSERT INTO log_entry_items
+            (log_entry_id, description, calories, is_estimate)
+        VALUES (?, ?, ?, 0)
+        """,
+        (cursor.lastrowid, food, calories),
+    )
+    db.commit()
+
+    flash(f"Logged to {meal_type}: {food} ({calories} cal)", "success")
     return redirect(url_for("food_page"))
 
 

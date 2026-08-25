@@ -101,6 +101,73 @@ class FoodLogRouteTests(FoodTrackerTestCase):
         self.assertIn(b"Couldn", response.data)
 
 
+class ManualFoodLogRouteTests(FoodTrackerTestCase):
+    def test_valid_entry_writes_to_db_as_non_estimate_without_calling_claude(self):
+        with patch("claude_client.call_claude") as mock_call_claude:
+            response = self.client.post(
+                "/food/log-direct",
+                data={"food": "Protein bar", "calories": "200", "meal_type": "Snack"},
+                follow_redirects=True,
+            )
+            mock_call_claude.assert_not_called()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Protein bar", response.data)
+        with sqlite3.connect(dbmod.DB_PATH) as conn:
+            row = conn.execute(
+                "SELECT description, calories, is_estimate FROM log_entry_items"
+            ).fetchone()
+        self.assertEqual(row, ("Protein bar", 200, 0))
+
+    def test_non_numeric_calories_does_not_write_and_flashes_error(self):
+        response = self.client.post(
+            "/food/log-direct",
+            data={"food": "Protein bar", "calories": "a lot", "meal_type": "Snack"},
+            follow_redirects=True,
+        )
+
+        self.assertIn(b"whole number", response.data)
+        with sqlite3.connect(dbmod.DB_PATH) as conn:
+            count = conn.execute("SELECT COUNT(*) FROM log_entries").fetchone()[0]
+        self.assertEqual(count, 0)
+
+    def test_zero_calories_is_rejected(self):
+        response = self.client.post(
+            "/food/log-direct",
+            data={"food": "Water", "calories": "0", "meal_type": "Drink"},
+            follow_redirects=True,
+        )
+
+        self.assertIn(b"whole number", response.data)
+        with sqlite3.connect(dbmod.DB_PATH) as conn:
+            count = conn.execute("SELECT COUNT(*) FROM log_entries").fetchone()[0]
+        self.assertEqual(count, 0)
+
+    def test_missing_food_label_does_not_write_and_flashes_error(self):
+        response = self.client.post(
+            "/food/log-direct",
+            data={"food": "", "calories": "100", "meal_type": "Snack"},
+            follow_redirects=True,
+        )
+
+        self.assertIn(b"Enter a food label", response.data)
+        with sqlite3.connect(dbmod.DB_PATH) as conn:
+            count = conn.execute("SELECT COUNT(*) FROM log_entries").fetchone()[0]
+        self.assertEqual(count, 0)
+
+    def test_invalid_meal_type_does_not_write_and_flashes_error(self):
+        response = self.client.post(
+            "/food/log-direct",
+            data={"food": "Chips", "calories": "150", "meal_type": "Midnight Feast"},
+            follow_redirects=True,
+        )
+
+        self.assertIn(b"Enter a food label", response.data)
+        with sqlite3.connect(dbmod.DB_PATH) as conn:
+            count = conn.execute("SELECT COUNT(*) FROM log_entries").fetchone()[0]
+        self.assertEqual(count, 0)
+
+
 class WeightLogRouteTests(FoodTrackerTestCase):
     def test_logging_weight_persists_and_shows_on_index(self):
         self.client.post("/log", data={"weight_lbs": "199.5"})
