@@ -247,7 +247,11 @@ Combine what Phase 1–5 built into one view — today's food entries, running t
 ### Phase 7 — Polish and quality-of-life (optional, only after 1–6 are solid)
 Candidates, not commitments: proactive "save as bundle?" prompting after a repeated-looking ad hoc meal, history/trend views, CSV export for backup, accessibility pass against the WCAG 2.1 AA requirement on the real UI (not just the earlier artifact), first-class mobile layout pass. Nothing here should block calling Phase 6 "done" and usable.
 
-Each phase boundary is a reasonable point to stop, use the app for real, and decide whether the next phase is worth building yet — not a forced march to Phase 7.
+### Phase 8 — Visual design / beautification (optional, only after 1–7 are solid)
+Candidates, not commitments: a considered color palette and typographic scale beyond the current functional grayscale/system-font baseline, refined spacing and visual hierarchy, small icons for meal types instead of plain text, and light visual branding (the emoji favicon added alongside this phase entry is a first, minimal step in that direction). Any motion or transitions introduced here must still respect `prefers-reduced-motion` per the existing accessibility requirement, and any new font/icon source still needs explicit sign-off first per the no-silent-additions rule. Deliberately kept separate from Phase 7: that phase is about features and data completeness, this one is purely about how the app looks and feels — the app should already be fully functional and accessible before spending effort here.
+*Usable for*: nothing new becomes usable that wasn't already — this phase makes daily use of the already-complete app more pleasant, not more capable.
+
+Each phase boundary is a reasonable point to stop, use the app for real, and decide whether the next phase is worth building yet — not a forced march to Phase 8.
 
 ---
 
