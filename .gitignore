@@ -14,3 +14,7 @@ venv/
 # Editor/OS
 .vscode/
 .DS_Store
+
+# Passenger
+tmp/
+public/

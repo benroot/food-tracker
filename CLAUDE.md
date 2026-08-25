@@ -157,6 +157,7 @@ Flow:
 These aren't formally confirmed for this project yet, but are carried over as a reasonable starting point based on how that project's standards were set, and how decisions have been made in conversation so far:
 
 - **Accessibility**: WCAG 2.1 AA minimum on any UI — semantic HTML, labeled form controls, sufficient contrast, visible keyboard focus states, full keyboard operability, respect for `prefers-reduced-motion`.
+- **Mobile usability**: Mobile and Desktop usability should be paramount. A suitable framework for CSS and/or JS may be necessary but should be discussed prior to inclusion.
 - **Minimal stack, resist creep**: plain HTML/CSS/JS preferred; add a framework only when there's a real state-management need, not by default. Avoid pulling in libraries "just in case."
 - **No silent additions**: before adding any external library, service, font, icon set, or CDN source, name exactly what's being added and why, and get explicit sign-off first. This extends the "no silent imports" rule from the artifact-design requirements to the app itself — e.g., don't add a message-carrier service, a hosted DB, or an ORM without flagging it first.
 - **Incremental, discussed decisions over big jumps**: architecture and scope changes (like choosing SQLite over Postgres) get raised and reasoned through explicitly rather than assumed.
