@@ -171,7 +171,7 @@ class ManualFoodLogRouteTests(FoodTrackerTestCase):
 class WeightLogRouteTests(FoodTrackerTestCase):
     def test_logging_weight_persists_and_shows_on_index(self):
         self.client.post("/log", data={"weight_lbs": "199.5"})
-        response = self.client.get("/")
+        response = self.client.get("/weight")
         self.assertIn(b"199.5", response.data)
 
 

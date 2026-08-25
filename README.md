@@ -37,7 +37,7 @@ Create a `.env` file (gitignored, copy from `.env.example`) with:
 ANTHROPIC_API_KEY=your-key-here
 ```
 
-Used by the `/food` chat route to parse food entries via the Claude API. Weight logging (`/`) doesn't need it.
+Used by the chat-based food logging route (`/`) to parse food entries via the Claude API. Weight logging (`/weight`) doesn't need it.
 
 `FOOD_LOG_DB_PATH` (optional) overrides the SQLite file path — useful for pointing at a scratch database while testing instead of the real `food_log.db`.
 

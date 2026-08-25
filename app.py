@@ -18,7 +18,7 @@ app.teardown_appcontext(dbmod.close_db)
 dbmod.init_db()
 
 
-@app.route("/", methods=["GET"])
+@app.route("/weight", methods=["GET"])
 def index():
     db = dbmod.get_db()
     latest = db.execute(
@@ -44,7 +44,7 @@ def log_weight():
     return redirect(url_for("index"))
 
 
-@app.route("/food", methods=["GET"])
+@app.route("/", methods=["GET"])
 def food_page():
     db = dbmod.get_db()
     today = date.today().isoformat()
