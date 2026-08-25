@@ -191,7 +191,7 @@ python -m unittest discover -s tests -v
 - `app.py` routes: exercised through Flask's test client against a scratch SQLite file (`FOOD_LOG_DB_PATH` env override, cleaned up after the run), with `claude_client.call_claude` mocked so route/DB/session logic is verified independent of the API.
 
 **How this should shape day-to-day development**:
-- A new route, or a new branch in an existing route's logic (e.g. Phase 3's bundle-matching resolution), gets a corresponding test before moving on — don't let the suite fall behind the code it's meant to describe.
+- A new route, or a new branch in an existing route's logic (e.g. Phase 5's bundle-matching resolution), gets a corresponding test before moving on — don't let the suite fall behind the code it's meant to describe.
 - Changing the `log_food_entry` tool schema, or the shape of Messages API response handling, means updating the mocked response fixtures in `test_claude_client.py` and `test_app.py` in the same change, not as a follow-up.
 - A `schema.sql` change that affects what a route reads or writes gets a test asserting the new columns/rows land correctly — not just a manual DB Browser check.
 - A bug fix should come with a regression test reproducing the bug where practical.
@@ -228,18 +228,26 @@ A Flask app with `weight_log` table and a single input using **simple, non-AI pa
 Introduce the Claude API call for the first time (via direct `requests` calls, per the Architecture decision above): a forced tool call (`log_food_entry`) parses something like "add a banana to breakfast" or "had two eggs and toast around 8am," inferring food, estimated calories, meal type, date (defaulting to today), and time (defaulting to now). Writes to the normalized SQLite schema. A page shows today's entries and running total. No bundle matching yet — every message is treated as a one-off meal.
 *Usable for*: the actual day-to-day food logging experience — the core value of the whole project.
 
-### Phase 3 — Meal bundles (manual creation + reuse)
+### Phase 3 — Direct manual entry (no API call)
+A lightweight form alongside the chat input: a food/meal label plus a calorie number, submitted and written straight to `log_entries` / `log_entry_items` without going through the Claude API. Uses `is_estimate = 0` (the value came directly from the user, not a model guess), and the same meal-type and date/time defaulting behavior as Phase 2. No parsing, no ambiguity, no API cost.
+*Usable for*: logging anything with an already-known calorie count (e.g. off a packaged food's nutrition label) without spending an API call estimating something that doesn't need estimating, and as a fallback path for logging if the Claude API is ever unavailable or budget-constrained.
+
+### Phase 4 — Direct manipulation of recently logged entries
+Add an interface on the food log page for editing or deleting an already-logged entry: correct the label or calorie count, or remove it outright if it was logged in error. Edits write directly to `log_entry_items` (and `log_entries` if the meal type also needs correcting) — a direct database update, not a re-parse through the Claude API. Editing date/time is explicitly out of scope for this phase (see Open Questions): most corrections are "wrong calorie count" or "typo in the food name," not "wrong timestamp," and it's a separable chunk of work with its own accessibility question (native `<input type="date">` + `<input type="time">` is the likely answer whenever it's tackled — see Open Questions).
+*Usable for*: fixing the inevitable case where a Claude estimate is off, a label came out mangled, or a message got sent twice by mistake — without needing to open the SQLite file by hand.
+
+### Phase 5 — Meal bundles (manual creation + reuse)
 Add `meal_bundles` / `meal_bundle_items` tables and a simple way to save a set of items as a named bundle — a manual "save this as..." action, not yet auto-detected or auto-suggested. Add matching logic so a message like "log the salmon rice dish again" resolves against saved bundle names (the `difflib` + candidate-list-in-prompt approach described above) and either logs it or asks for clarification.
 *Usable for*: real repeated-meal logging — the specific need that started this conversation.
 
-### Phase 4 — Unified dashboard
-Combine what Phase 1–3 built into one view — today's food entries, running total, and latest weight together — replacing the need to check separate pages.
+### Phase 6 — Unified dashboard
+Combine what Phase 1–5 built into one view — today's food entries, running total, and latest weight together — replacing the need to check separate pages.
 *Usable for*: full parity with the original CSV-based project, but now backed by a real database and a live web UI instead of file re-uploads.
 
-### Phase 5 — Polish and quality-of-life (optional, only after 1–4 are solid)
-Candidates, not commitments: proactive "save as bundle?" prompting after a repeated-looking ad hoc meal, history/trend views, CSV export for backup, accessibility pass against the WCAG 2.1 AA requirement on the real UI (not just the earlier artifact), first-class mobile layout pass. Nothing here should block calling Phase 4 "done" and usable.
+### Phase 7 — Polish and quality-of-life (optional, only after 1–6 are solid)
+Candidates, not commitments: proactive "save as bundle?" prompting after a repeated-looking ad hoc meal, history/trend views, CSV export for backup, accessibility pass against the WCAG 2.1 AA requirement on the real UI (not just the earlier artifact), first-class mobile layout pass. Nothing here should block calling Phase 6 "done" and usable.
 
-Each phase boundary is a reasonable point to stop, use the app for real, and decide whether the next phase is worth building yet — not a forced march to Phase 5.
+Each phase boundary is a reasonable point to stop, use the app for real, and decide whether the next phase is worth building yet — not a forced march to Phase 7.
 
 ---
 
@@ -249,3 +257,4 @@ Each phase boundary is a reasonable point to stop, use the app for real, and dec
 - Whether "offer to save as a bundle" gets built in v1 or deferred
 - Whether `food_items` gets populated proactively or only grows organically as items are logged
 - Whether/when a CSS or JS framework becomes justified for the mobile/desktop usability requirement, and which one — explicitly deferred until there's a concrete need, per the no-silent-additions rule
+- Whether/when to extend Phase 4's entry editing to cover date/time (deferred out of Phase 4 itself). If and when it's built, native `<input type="date">` + `<input type="time">` is the recommended approach over a combined `<input type="datetime-local">` or a custom JS picker library: zero added dependency, and both render as accessible native controls on iOS Safari (wheel-style pickers) and desktop browsers (calendar/clock dropdowns), meeting WCAG 2.1 AA by default.
