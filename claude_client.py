@@ -1,5 +1,9 @@
-import anthropic
+import os
 
+import requests
+
+API_URL = "https://api.anthropic.com/v1/messages"
+ANTHROPIC_VERSION = "2023-06-01"
 MODEL = "claude-sonnet-5"
 
 SYSTEM_PROMPT = (
@@ -45,27 +49,33 @@ LOG_FOOD_ENTRY_TOOL = {
 
 
 def call_claude(messages):
-    client = anthropic.Anthropic()
-    return client.messages.create(
-        model=MODEL,
-        max_tokens=1024,
-        system=SYSTEM_PROMPT,
-        tools=[LOG_FOOD_ENTRY_TOOL],
-        tool_choice={"type": "tool", "name": "log_food_entry"},
-        messages=messages,
+    response = requests.post(
+        API_URL,
+        headers={
+            "x-api-key": os.environ["ANTHROPIC_API_KEY"],
+            "anthropic-version": ANTHROPIC_VERSION,
+            "content-type": "application/json",
+        },
+        json={
+            "model": MODEL,
+            "max_tokens": 1024,
+            "system": SYSTEM_PROMPT,
+            "tools": [LOG_FOOD_ENTRY_TOOL],
+            "tool_choice": {"type": "tool", "name": "log_food_entry"},
+            "messages": messages,
+        },
     )
+    response.raise_for_status()
+    return response.json()
 
 
 def extract_tool_input(response):
-    tool_use = next(block for block in response.content if block.type == "tool_use")
-    return tool_use.input
+    tool_use = next(block for block in response["content"] if block["type"] == "tool_use")
+    return tool_use["input"]
 
 
 def response_as_message(response):
-    return {
-        "role": "assistant",
-        "content": [block.model_dump() for block in response.content],
-    }
+    return {"role": "assistant", "content": response["content"]}
 
 
 def build_user_turn(history, user_text):

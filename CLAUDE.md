@@ -171,7 +171,31 @@ Flow:
 - `ANTHROPIC_API_KEY` via environment variable / `.env` locally (gitignored, never committed) — production uses cPanel's environment-variable UI instead, not `.env` (see Deployment Target).
 - SQLite file for local data — no external services required to develop or test.
 - Local dev server + browser at localhost; manually test by sending a food message through the chat UI and confirming the row lands correctly in the SQLite file (inspectable with a tool like DB Browser for SQLite).
-- Basic tests should mock the Claude API response (the `requests` call, per the Architecture decision above) rather than hitting the live API on every test run.
+- Automated tests never call the live Claude API — see Testing Strategy below.
+
+---
+
+## Testing Strategy
+
+**Framework**: stdlib `unittest` + `unittest.mock` — no `pytest` or other test dependency added, consistent with the minimal-stack philosophy (see Development Style). Revisit only if a real limitation shows up in practice, and flag it explicitly first, per the no-silent-additions rule.
+
+**Location & running**: tests live in `tests/`, one file per module under test (`test_claude_client.py`, `test_app.py`, ...). Run the full suite with:
+```
+python -m unittest discover -s tests -v
+```
+
+**No live API calls in the automated suite, ever.** `claude_client.call_claude` (or the underlying `requests.post`) is mocked with a canned response shaped like the real Messages API tool-use payload, so the suite is fast, free, deterministic, and runnable without `ANTHROPIC_API_KEY` set. A live call against the real endpoint is a manual, occasional smoke test — worth doing after touching request/response handling in `claude_client.py` (e.g. a schema or auth change), but never something the automated suite does on its own. Keep any such manual check to the minimum number of calls needed (usually one) and a short, unambiguous prompt, to keep token cost negligible.
+
+**What to test at each layer**:
+- `claude_client.py`: request shape (headers, forced `tool_choice`) and response parsing (`extract_tool_input`, `response_as_message`, `build_user_turn`'s tool_result stitching) — via mocked `requests.post`.
+- `app.py` routes: exercised through Flask's test client against a scratch SQLite file (`FOOD_LOG_DB_PATH` env override, cleaned up after the run), with `claude_client.call_claude` mocked so route/DB/session logic is verified independent of the API.
+
+**How this should shape day-to-day development**:
+- A new route, or a new branch in an existing route's logic (e.g. Phase 3's bundle-matching resolution), gets a corresponding test before moving on — don't let the suite fall behind the code it's meant to describe.
+- Changing the `log_food_entry` tool schema, or the shape of Messages API response handling, means updating the mocked response fixtures in `test_claude_client.py` and `test_app.py` in the same change, not as a follow-up.
+- A `schema.sql` change that affects what a route reads or writes gets a test asserting the new columns/rows land correctly — not just a manual DB Browser check.
+- A bug fix should come with a regression test reproducing the bug where practical.
+- Per the phase-boundary philosophy in Development Phases, run the full suite before calling a phase "done" and moving to the next one — it's the fast, repeatable counterpart to the "actually open it in a browser" check each phase already requires.
 
 ---
 
@@ -198,7 +222,7 @@ Each phase should leave a genuinely runnable app on the local dev server — som
 
 ### Phase 1 — Weight logging (proof of concept)
 A Flask app with `weight_log` table and a single input using **simple, non-AI parsing** — e.g. a lightweight regex/string parse pulling a number out of something like "my weight today is 233.5" (or just a plain numeric form field, whichever is less code). No Claude API call in this phase; weight entries are unambiguous enough not to need it. A page shows the most recent weight entry.
-*Usable for*: confirming Flask + SQLite + the dev server actually work together, with the simplest possible real feature — before spending effort on food parsing's added complexity, and before introducing the Claude API call at all (that arrives in Phase 2). Also a good first checkpoint to confirm the Python 3.8.20 environment itself is working end to end, before any API-calling code is added.
+*Usable for*: confirming Flask + SQLite + the dev server actually work together, with the simplest possible real feature — before spending effort on food parsing's added complexity, and before introducing the Claude API call at all (that arrives in Phase 2). Also a good first checkpoint to confirm the Python 3.8 environment itself is working end to end, before any API-calling code is added.
 
 ### Phase 2 — Natural language logging for new (one-off) meals
 Introduce the Claude API call for the first time (via direct `requests` calls, per the Architecture decision above): a forced tool call (`log_food_entry`) parses something like "add a banana to breakfast" or "had two eggs and toast around 8am," inferring food, estimated calories, meal type, date (defaulting to today), and time (defaulting to now). Writes to the normalized SQLite schema. A page shows today's entries and running total. No bundle matching yet — every message is treated as a one-off meal.
