@@ -14,6 +14,7 @@ venv/
 # Editor/OS
 .vscode/
 .DS_Store
+install-pyenv-win-ps1
 
 # Passenger
 tmp/

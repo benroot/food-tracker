@@ -6,7 +6,7 @@ A single-user web app for conversational food and weight logging. Replaces the C
 ---
 
 ## Status
-Design phase complete (architecture, schema, model approach agreed). Not yet scaffolded. Next step is to build the initial repo, most likely with Claude Code rather than in-chat, since the remaining work is multi-file implementation and local iteration rather than design decisions.
+Design phase complete (architecture, schema, model approach, hosting, and deployment approach all agreed). Not yet scaffolded. Next step is to build the initial repo, most likely with Claude Code rather than in-chat, since the remaining work is multi-file implementation and local iteration rather than design decisions.
 
 ---
 
@@ -18,15 +18,37 @@ Design phase complete (architecture, schema, model approach agreed). Not yet sca
 
 **Parsing & calorie estimation**: the backend calls the Claude API with a forced tool call (not free-text JSON) to get guaranteed-structured output. See schema below.
 
-**Storage**: SQLite for local development (single file, zero setup), with a **fairly normalized relational schema** — see below. A hosted Postgres (e.g. Supabase or Neon) is the likely upgrade path if/when this moves beyond local dev — not needed before then.
+**Claude API access: direct HTTP via `requests`, not the official `anthropic` Python SDK.** This was an explicit decision, not a default. The current `anthropic` SDK (v1.0+, Aug 2026) requires Python 3.10+, which is incompatible with the production server's Python 3.8.20 ceiling (see Deployment Target below). Rather than pin to an old SDK release and risk hitting this same wall again on a future SDK update, the app calls the Messages API directly over HTTPS with `requests` (minimal, and has no Python-version floor anywhere near this app's needs). This is consistent with the project's minimal-stack philosophy — one fewer dependency, and one less thing that can silently break compatibility again later.
+
+**Storage**: SQLite for local development (single file, zero setup), with a **fairly normalized relational schema** — see below. A hosted Postgres (e.g. Supabase or Neon) is a possible future upgrade path but is not the current plan — the confirmed host is cPanel shared hosting with SQLite as a file on disk.
 
 **Frontend**: a chat thread view (log new entries) plus a small persistent summary (today's entries + running total, most recent weight) — deliberately minimal, mirroring the "bland, glanceable" tracker artifact already built in the original project.
 
 ---
 
+## Deployment Target
+
+**Hosting**: cPanel-based shared hosting, using cPanel's **"Setup Python App"** tool (Passenger integration). Apache already owns the standard web ports on this host — the app is never a standalone process listening on its own port; Passenger runs it inside Apache's process model. This is what makes shared hosting workable at all here, since opening a custom port isn't available.
+
+**Python version constraint: 3.8.20**, fixed by what the host supports — not a preference, a hard ceiling. This drives two things:
+- **Local dev must match**: use `pyenv` to install and pin Python 3.8.20 for this project specifically, without disturbing the system/default Python (3.14) used elsewhere. `pyenv local 3.8.20` in the project root creates a `.python-version` file — commit this to git so the required version is documented and reproducible.
+- **Dependency choices must stay 3.8-compatible**: this is the direct reason the Claude API is called via `requests` rather than the official SDK (see Architecture above). Also avoid Python 3.9+/3.10+-only syntax if it ever comes up: no `match`/`case`, no `X | Y` union type hints, no `X | Y` dict-merge operator.
+- Worth being aware of (not something in our control): Python 3.8 reached end-of-life in October 2024, so this is a security-patching tradeoff inherent to the host, not something to try to fix locally.
+
+**WSGI entry point**: `passenger_wsgi.py` lives in the project root, alongside the Flask app code, and **is committed to git** (unlike `.env` — it contains no secrets, just the import wiring Passenger needs to find the Flask `app` object under the variable name `application`).
+
+**Environment variables / secrets**: cPanel's "Setup Python App" page has its own environment-variable section — this is the source of truth for `ANTHROPIC_API_KEY` in production, not a `.env` file (some Passenger setups don't reliably auto-load `.env` the way local dev does with `python-dotenv`). Verify directly once deployed rather than assuming parity with local behavior.
+
+**Version control & deploys**:
+- Git is used for real version history and rollback safety, regardless of deployment mechanism.
+- Deploy process is intentionally manual and lightweight: SSH or cPanel Terminal → `git pull` → click "Restart" on the Python App page. No CI/CD pipeline — deliberately avoided as unnecessary complexity (deploy keys, secrets on a third-party service, a pipeline to debug) for a single-user app deployed occasionally, by hand, on purpose.
+- If the cPanel account has SSH/Terminal access, use that directly for `git pull`. If not, check for cPanel's built-in "Git Version Control" tool, which supports cloning/pulling without shell access.
+
+---
+
 ## Parsing Tool Schema
 
-Forced tool call pattern — the backend never parses free-text JSON from a prompt; it defines a tool whose schema is the desired shape and forces that tool via `tool_choice`.
+Forced tool call pattern — the backend never parses free-text JSON from a prompt; it defines a tool whose schema is the desired shape and forces that tool via `tool_choice`. (Implemented via direct `requests` calls to the Messages API — see Architecture — rather than the `anthropic` SDK's tool-use helpers.)
 
 ```json
 {
@@ -145,10 +167,11 @@ Flow:
 
 ## Local Development
 
-- `ANTHROPIC_API_KEY` via environment variable / `.env` (gitignored, never committed)
-- SQLite file for local data — no external services required to develop or test
-- Local dev server + browser at localhost; manually test by sending a food message through the chat UI and confirming the row lands correctly in the SQLite file (inspectable with a tool like DB Browser for SQLite)
-- Basic tests should mock the Anthropic API response rather than hitting the live API on every test run
+- Python **3.8.20**, managed via `pyenv` (`pyenv local 3.8.20`), to match the production constraint exactly rather than developing against a newer version and discovering incompatibilities later.
+- `ANTHROPIC_API_KEY` via environment variable / `.env` locally (gitignored, never committed) — production uses cPanel's environment-variable UI instead, not `.env` (see Deployment Target).
+- SQLite file for local data — no external services required to develop or test.
+- Local dev server + browser at localhost; manually test by sending a food message through the chat UI and confirming the row lands correctly in the SQLite file (inspectable with a tool like DB Browser for SQLite).
+- Basic tests should mock the Claude API response (the `requests` call, per the Architecture decision above) rather than hitting the live API on every test run.
 
 ---
 
@@ -157,11 +180,11 @@ Flow:
 These aren't formally confirmed for this project yet, but are carried over as a reasonable starting point based on how that project's standards were set, and how decisions have been made in conversation so far:
 
 - **Accessibility**: WCAG 2.1 AA minimum on any UI — semantic HTML, labeled form controls, sufficient contrast, visible keyboard focus states, full keyboard operability, respect for `prefers-reduced-motion`.
-- **Mobile usability**: Mobile and Desktop usability should be paramount. A suitable framework for CSS and/or JS may be necessary but should be discussed prior to inclusion.
+- **Mobile usability**: mobile and desktop usability should be paramount. A suitable framework for CSS and/or JS may be necessary but should be discussed prior to inclusion.
 - **Minimal stack, resist creep**: plain HTML/CSS/JS preferred; add a framework only when there's a real state-management need, not by default. Avoid pulling in libraries "just in case."
-- **No silent additions**: before adding any external library, service, font, icon set, or CDN source, name exactly what's being added and why, and get explicit sign-off first. This extends the "no silent imports" rule from the artifact-design requirements to the app itself — e.g., don't add a message-carrier service, a hosted DB, or an ORM without flagging it first.
-- **Incremental, discussed decisions over big jumps**: architecture and scope changes (like choosing SQLite over Postgres) get raised and reasoned through explicitly rather than assumed.
-- **Prefer the simplest solution that actually fits the scale**: repeatedly, the right call here has been "this is a single-user, low-volume tool — don't over-build it" (SQLite over a hosted DB, one model tier over a routing setup, Flask over FastAPI, stdlib `sqlite3`/`difflib` over added dependencies where they're sufficient).
+- **No silent additions**: before adding any external library, service, font, icon set, or CDN source, name exactly what's being added and why, and get explicit sign-off first. This extends the "no silent imports" rule from the artifact-design requirements to the app itself — e.g., don't add a message-carrier service, a hosted DB, an ORM, or (as happened here) a version-incompatible SDK, without flagging it first.
+- **Incremental, discussed decisions over big jumps**: architecture and scope changes (like choosing SQLite over Postgres, or `requests` over the official SDK) get raised and reasoned through explicitly rather than assumed.
+- **Prefer the simplest solution that actually fits the scale**: repeatedly, the right call here has been "this is a single-user, low-volume tool — don't over-build it" (SQLite over a hosted DB, one model tier over a routing setup, Flask over FastAPI, manual `git pull` over CI/CD, stdlib `sqlite3`/`difflib`/`requests` over added dependencies where they're sufficient).
 - **Data modeling instinct**: reference/catalog data (food items, saved meal bundles) should be normalized and editable; logged history should be treated as an immutable, snapshotted event log even when it duplicates data from a reference table. Don't collapse these into one convenient table just to reduce table count.
 - **Casual, conversational tone carries over**: the logging experience itself should stay natural-language and low-friction, consistent with the original project's interaction style.
 
@@ -175,10 +198,10 @@ Each phase should leave a genuinely runnable app on the local dev server — som
 
 ### Phase 1 — Weight logging (proof of concept)
 A Flask app with `weight_log` table and a single input using **simple, non-AI parsing** — e.g. a lightweight regex/string parse pulling a number out of something like "my weight today is 233.5" (or just a plain numeric form field, whichever is less code). No Claude API call in this phase; weight entries are unambiguous enough not to need it. A page shows the most recent weight entry.
-*Usable for*: confirming Flask + SQLite + the dev server actually work together, with the simplest possible real feature — before spending effort on food parsing's added complexity, and before introducing the Claude API call at all (that arrives in Phase 2).
+*Usable for*: confirming Flask + SQLite + the dev server actually work together, with the simplest possible real feature — before spending effort on food parsing's added complexity, and before introducing the Claude API call at all (that arrives in Phase 2). Also a good first checkpoint to confirm the Python 3.8.20 environment itself is working end to end, before any API-calling code is added.
 
 ### Phase 2 — Natural language logging for new (one-off) meals
-Introduce the Claude API call for the first time: a forced tool call (`log_food_entry`) parses something like "add a banana to breakfast" or "had two eggs and toast around 8am," inferring food, estimated calories, meal type, date (defaulting to today), and time (defaulting to now). Writes to the normalized SQLite schema. A page shows today's entries and running total. No bundle matching yet — every message is treated as a one-off meal.
+Introduce the Claude API call for the first time (via direct `requests` calls, per the Architecture decision above): a forced tool call (`log_food_entry`) parses something like "add a banana to breakfast" or "had two eggs and toast around 8am," inferring food, estimated calories, meal type, date (defaulting to today), and time (defaulting to now). Writes to the normalized SQLite schema. A page shows today's entries and running total. No bundle matching yet — every message is treated as a one-off meal.
 *Usable for*: the actual day-to-day food logging experience — the core value of the whole project.
 
 ### Phase 3 — Meal bundles (manual creation + reuse)
@@ -190,11 +213,15 @@ Combine what Phase 1–3 built into one view — today's food entries, running t
 *Usable for*: full parity with the original CSV-based project, but now backed by a real database and a live web UI instead of file re-uploads.
 
 ### Phase 5 — Polish and quality-of-life (optional, only after 1–4 are solid)
-Candidates, not commitments: proactive "save as bundle?" prompting after a repeated-looking ad hoc meal, history/trend views, CSV export for backup, accessibility pass against the WCAG 2.1 AA requirement on the real UI (not just the earlier artifact). Nothing here should block calling Phase 4 "done" and usable.
+Candidates, not commitments: proactive "save as bundle?" prompting after a repeated-looking ad hoc meal, history/trend views, CSV export for backup, accessibility pass against the WCAG 2.1 AA requirement on the real UI (not just the earlier artifact), first-class mobile layout pass. Nothing here should block calling Phase 4 "done" and usable.
 
 Each phase boundary is a reasonable point to stop, use the app for real, and decide whether the next phase is worth building yet — not a forced march to Phase 5.
-- Exact hosting choice when moving past local dev
+
+---
+
+## Open Questions / Not Yet Decided
 - Whether weight logging gets its own parsing tool or reuses a simpler direct-entry path (it's less ambiguous than food, may not need LLM parsing at all)
 - Auth approach (likely unnecessary for single-user, but worth an explicit decision rather than default)
 - Whether "offer to save as a bundle" gets built in v1 or deferred
 - Whether `food_items` gets populated proactively or only grows organically as items are logged
+- Whether/when a CSS or JS framework becomes justified for the mobile/desktop usability requirement, and which one — explicitly deferred until there's a concrete need, per the no-silent-additions rule
