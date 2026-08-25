@@ -13,6 +13,7 @@ app = Flask(__name__)
 app.secret_key = secrets.token_hex(32)
 
 app.teardown_appcontext(dbmod.close_db)
+dbmod.init_db()
 
 
 @app.route("/", methods=["GET"])
@@ -126,5 +127,4 @@ def food_log():
 
 
 if __name__ == "__main__":
-    dbmod.init_db()
     app.run(debug=True)
