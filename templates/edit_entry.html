@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Edit Entry{% endblock %}
+{% block content %}
+  <h1>Edit entry</h1>
+
+  {% if entry["sibling_count"] > 1 %}
+    <p class="pending-question" role="status">
+      This meal has {{ entry["sibling_count"] }} items logged together — changing the meal here changes it for all of them.
+    </p>
+  {% endif %}
+
+  <form method="post" action="{{ url_for('food_entry_edit', item_id=entry['item_id']) }}">
+    <label for="food">Food</label>
+    <input type="text" id="food" name="food" value="{{ entry['description'] }}" required>
+
+    <label for="calories">Calories</label>
+    <input type="number" id="calories" name="calories" min="1" step="1" value="{{ entry['calories'] }}" required>
+
+    <label for="meal_type">Meal</label>
+    <select id="meal_type" name="meal_type" required>
+      {% for meal in meal_types %}
+        <option value="{{ meal }}" {% if meal == entry["meal_type"] %}selected{% endif %}>{{ meal }}</option>
+      {% endfor %}
+    </select>
+
+    <button type="submit">Save changes</button>
+  </form>
+
+  <p><a href="{{ url_for('food_page') }}">Cancel</a></p>
+{% endblock %}

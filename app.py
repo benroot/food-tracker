@@ -50,13 +50,13 @@ def food_page():
     today = date.today().isoformat()
     entries = db.execute(
         """
-        SELECT le.id, le.meal_type, le.entry_time,
+        SELECT lei.id AS item_id, le.meal_type, le.entry_time,
                lei.description, lei.quantity, lei.calories,
                lei.is_estimate, lei.assumption_note
         FROM log_entries le
         JOIN log_entry_items lei ON lei.log_entry_id = le.id
         WHERE le.entry_date = ?
-        ORDER BY le.entry_time, le.id
+        ORDER BY le.entry_time, lei.id
         """,
         (today,),
     ).fetchall()
@@ -164,6 +164,87 @@ def food_log_direct():
     db.commit()
 
     flash(f"Logged to {meal_type}: {food} ({calories} cal)", "success")
+    return redirect(url_for("food_page"))
+
+
+@app.route("/food/entries/<int:item_id>/edit", methods=["GET"])
+def food_entry_edit_form(item_id):
+    db = dbmod.get_db()
+    entry = db.execute(
+        """
+        SELECT lei.id AS item_id, lei.description, lei.calories, le.meal_type,
+               (SELECT COUNT(*) FROM log_entry_items WHERE log_entry_id = le.id) AS sibling_count
+        FROM log_entry_items lei
+        JOIN log_entries le ON le.id = lei.log_entry_id
+        WHERE lei.id = ?
+        """,
+        (item_id,),
+    ).fetchone()
+    if entry is None:
+        flash("That entry no longer exists.", "error")
+        return redirect(url_for("food_page"))
+    return render_template("edit_entry.html", entry=entry, meal_types=MEAL_TYPES)
+
+
+@app.route("/food/entries/<int:item_id>/edit", methods=["POST"])
+def food_entry_edit(item_id):
+    db = dbmod.get_db()
+    row = db.execute(
+        "SELECT log_entry_id FROM log_entry_items WHERE id = ?", (item_id,)
+    ).fetchone()
+    if row is None:
+        flash("That entry no longer exists.", "error")
+        return redirect(url_for("food_page"))
+
+    food = request.form.get("food", "").strip()
+    calories_raw = request.form.get("calories", "").strip()
+    meal_type = request.form.get("meal_type", "").strip()
+
+    if not food or meal_type not in MEAL_TYPES:
+        flash("Enter a food label and pick a meal.", "error")
+        return redirect(url_for("food_entry_edit_form", item_id=item_id))
+
+    try:
+        calories = int(calories_raw)
+        if calories <= 0:
+            raise ValueError
+    except ValueError:
+        flash("Calories must be a whole number greater than 0.", "error")
+        return redirect(url_for("food_entry_edit_form", item_id=item_id))
+
+    db.execute(
+        "UPDATE log_entry_items SET description = ?, calories = ? WHERE id = ?",
+        (food, calories, item_id),
+    )
+    db.execute(
+        "UPDATE log_entries SET meal_type = ? WHERE id = ?",
+        (meal_type, row["log_entry_id"]),
+    )
+    db.commit()
+
+    flash(f"Updated: {food} ({calories} cal)", "success")
+    return redirect(url_for("food_page"))
+
+
+@app.route("/food/entries/<int:item_id>/delete", methods=["POST"])
+def food_entry_delete(item_id):
+    db = dbmod.get_db()
+    row = db.execute(
+        "SELECT log_entry_id, description FROM log_entry_items WHERE id = ?", (item_id,)
+    ).fetchone()
+    if row is None:
+        flash("That entry no longer exists.", "error")
+        return redirect(url_for("food_page"))
+
+    db.execute("DELETE FROM log_entry_items WHERE id = ?", (item_id,))
+    remaining = db.execute(
+        "SELECT COUNT(*) FROM log_entry_items WHERE log_entry_id = ?", (row["log_entry_id"],)
+    ).fetchone()[0]
+    if remaining == 0:
+        db.execute("DELETE FROM log_entries WHERE id = ?", (row["log_entry_id"],))
+    db.commit()
+
+    flash(f'Deleted: {row["description"]}', "success")
     return redirect(url_for("food_page"))
 
 
