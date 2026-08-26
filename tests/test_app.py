@@ -305,6 +305,30 @@ class WeightLogRouteTests(FoodTrackerTestCase):
         response = self.client.get("/weight")
         self.assertIn(b"199.5", response.data)
 
+    def test_history_shows_all_entries_in_reverse_chronological_order(self):
+        with sqlite3.connect(dbmod.DB_PATH) as conn:
+            conn.executescript(
+                """
+                INSERT INTO weight_log (entry_date, weight_lbs) VALUES ('2026-08-20', 201.0);
+                INSERT INTO weight_log (entry_date, weight_lbs) VALUES ('2026-08-22', 200.0);
+                INSERT INTO weight_log (entry_date, weight_lbs) VALUES ('2026-08-21', 200.5);
+                """
+            )
+
+        response = self.client.get("/weight")
+
+        dates_in_order = [
+            line for line in response.data.decode().splitlines() if "2026-08-2" in line
+        ]
+        self.assertEqual(
+            [d.strip() for d in dates_in_order],
+            ["<td>2026-08-22</td>", "<td>2026-08-21</td>", "<td>2026-08-20</td>"],
+        )
+
+    def test_no_entries_shows_empty_state(self):
+        response = self.client.get("/weight")
+        self.assertIn(b"No weight logged yet.", response.data)
+
 
 if __name__ == "__main__":
     unittest.main()

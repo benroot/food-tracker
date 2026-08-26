@@ -21,10 +21,10 @@ dbmod.init_db()
 @app.route("/weight", methods=["GET"])
 def index():
     db = dbmod.get_db()
-    latest = db.execute(
-        "SELECT entry_date, weight_lbs FROM weight_log ORDER BY entry_date DESC LIMIT 1"
-    ).fetchone()
-    return render_template("index.html", latest=latest)
+    entries = db.execute(
+        "SELECT entry_date, weight_lbs FROM weight_log ORDER BY entry_date DESC"
+    ).fetchall()
+    return render_template("index.html", entries=entries)
 
 
 @app.route("/log", methods=["POST"])

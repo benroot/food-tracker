@@ -122,20 +122,6 @@ td {
   margin-left: 0.25rem;
 }
 
-.latest {
-  font-size: 1.25rem;
-  margin-bottom: 2rem;
-}
-
-.latest-value {
-  font-weight: 600;
-}
-
-.latest-date {
-  color: #444;
-  margin-left: 0.5rem;
-}
-
 form {
   display: flex;
   flex-direction: column;
