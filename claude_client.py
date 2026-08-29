@@ -13,7 +13,10 @@ SYSTEM_PROMPT = (
     "items as estimates with a short assumption note. Only ask for "
     "clarification when the message is genuinely ambiguous about what was "
     "eaten or which meal it belongs to -- don't ask about things you can "
-    "reasonably assume."
+    "reasonably assume. If the message explicitly states what time the food "
+    "was eaten (e.g. 'at 7am', 'around 8:30pm', 'breakfast at 7'), set "
+    "entry_time to that time in 24-hour HH:MM format. If no time is stated, "
+    "omit entry_time entirely so the app can default to the current time."
 )
 
 LOG_FOOD_ENTRY_TOOL = {
@@ -39,6 +42,10 @@ LOG_FOOD_ENTRY_TOOL = {
             "meal_type": {
                 "type": "string",
                 "enum": ["Breakfast", "Lunch", "Dinner", "Snack", "Dessert", "Drink"],
+            },
+            "entry_time": {
+                "type": "string",
+                "description": "24-hour HH:MM time the food was eaten, only if explicitly stated in the message. Omit if no time was mentioned.",
             },
             "needs_clarification": {"type": "boolean"},
             "clarification_question": {"type": "string"},

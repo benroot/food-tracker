@@ -100,6 +100,52 @@ class FoodLogRouteTests(FoodTrackerTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Couldn", response.data)
 
+    @patch("claude_client.call_claude")
+    def test_explicit_entry_time_from_message_is_used(self, mock_call_claude):
+        mock_call_claude.return_value = fake_response(
+            {
+                "items": [{"food": "Omelette", "estimated_calories": 400, "is_estimate": False}],
+                "meal_type": "Breakfast",
+                "entry_time": "07:00",
+                "needs_clarification": False,
+            }
+        )
+
+        self.client.post(
+            "/food/log", data={"message": "breakfast at 7am: omelette for 400 calories"}
+        )
+
+        with sqlite3.connect(dbmod.DB_PATH) as conn:
+            entry_time = conn.execute("SELECT entry_time FROM log_entries").fetchone()[0]
+        self.assertEqual(entry_time, "07:00")
+
+    @patch("claude_client.call_claude")
+    def test_malformed_entry_time_falls_back_to_current_time(self, mock_call_claude):
+        mock_call_claude.return_value = fake_response(
+            {
+                "items": [{"food": "Toast", "estimated_calories": 100, "is_estimate": True}],
+                "meal_type": "Breakfast",
+                "entry_time": "7am",
+                "needs_clarification": False,
+            }
+        )
+
+        self.client.post("/food/log", data={"message": "toast"})
+
+        with sqlite3.connect(dbmod.DB_PATH) as conn:
+            entry_time = conn.execute("SELECT entry_time FROM log_entries").fetchone()[0]
+        self.assertRegex(entry_time, r"^([01]\d|2[0-3]):[0-5]\d$")
+
+    @patch("claude_client.call_claude")
+    def test_missing_entry_time_falls_back_to_current_time(self, mock_call_claude):
+        mock_call_claude.return_value = fake_response(TOOL_INPUT_APPLE)
+
+        self.client.post("/food/log", data={"message": "an apple"})
+
+        with sqlite3.connect(dbmod.DB_PATH) as conn:
+            entry_time = conn.execute("SELECT entry_time FROM log_entries").fetchone()[0]
+        self.assertRegex(entry_time, r"^([01]\d|2[0-3]):[0-5]\d$")
+
 
 class ManualFoodLogRouteTests(FoodTrackerTestCase):
     def test_valid_entry_writes_to_db_as_non_estimate_without_calling_claude(self):

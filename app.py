@@ -1,3 +1,4 @@
+import re
 import secrets
 from datetime import date, datetime
 
@@ -10,6 +11,7 @@ from config import load_env_file
 load_env_file()
 
 MEAL_TYPES = ("Breakfast", "Lunch", "Dinner", "Snack", "Dessert", "Drink")
+TIME_PATTERN = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 app = Flask(__name__)
 app.secret_key = secrets.token_hex(32)
@@ -97,9 +99,11 @@ def food_log():
 
     db = dbmod.get_db()
     now = datetime.now()
+    parsed_time = tool_input.get("entry_time")
+    entry_time = parsed_time if parsed_time and TIME_PATTERN.match(parsed_time) else now.strftime("%H:%M")
     cursor = db.execute(
         "INSERT INTO log_entries (entry_date, entry_time, meal_type) VALUES (?, ?, ?)",
-        (now.date().isoformat(), now.strftime("%H:%M"), tool_input["meal_type"]),
+        (now.date().isoformat(), entry_time, tool_input["meal_type"]),
     )
     log_entry_id = cursor.lastrowid
     for item in tool_input["items"]:
