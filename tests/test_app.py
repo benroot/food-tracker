@@ -407,7 +407,9 @@ class RepeatMealRouteTests(FoodTrackerTestCase):
             [("Omelette", 400, 0, None), ("Juice", 110, 1, "Assumed 8oz")],
         )
 
-        response = self.client.post(f"/food/repeat/{entry_id}", follow_redirects=True)
+        response = self.client.post(
+            "/food/repeat", data={"entry_id": str(entry_id)}, follow_redirects=True
+        )
 
         self.assertIn(b"Omelette", response.data)
         with sqlite3.connect(dbmod.DB_PATH) as conn:
@@ -426,8 +428,38 @@ class RepeatMealRouteTests(FoodTrackerTestCase):
         self.assertEqual(today_rows[1][:4], ("Juice", 110, 1, "Assumed 8oz"))
         self.assertEqual(today_rows[0][4], "Breakfast")
 
+    def test_repeating_with_explicit_time_uses_that_time(self):
+        entry_id = self._seed_past_entry("2026-08-20", "Breakfast", [("Omelette", 400, 0, None)])
+
+        self.client.post("/food/repeat", data={"entry_id": str(entry_id), "entry_time": "07:00"})
+
+        with sqlite3.connect(dbmod.DB_PATH) as conn:
+            entry_time = conn.execute(
+                "SELECT entry_time FROM log_entries WHERE entry_date = ?",
+                (date.today().isoformat(),),
+            ).fetchone()[0]
+        self.assertEqual(entry_time, "07:00")
+
+    def test_repeating_with_blank_time_falls_back_to_current_time(self):
+        entry_id = self._seed_past_entry("2026-08-20", "Breakfast", [("Omelette", 400, 0, None)])
+
+        self.client.post("/food/repeat", data={"entry_id": str(entry_id), "entry_time": ""})
+
+        with sqlite3.connect(dbmod.DB_PATH) as conn:
+            entry_time = conn.execute(
+                "SELECT entry_time FROM log_entries WHERE entry_date = ?",
+                (date.today().isoformat(),),
+            ).fetchone()[0]
+        self.assertRegex(entry_time, r"^([01]\d|2[0-3]):[0-5]\d$")
+
     def test_repeating_nonexistent_entry_flashes_error(self):
-        response = self.client.post("/food/repeat/9999", follow_redirects=True)
+        response = self.client.post(
+            "/food/repeat", data={"entry_id": "9999"}, follow_redirects=True
+        )
+        self.assertIn(b"no longer exists", response.data)
+
+    def test_repeating_with_missing_entry_id_flashes_error(self):
+        response = self.client.post("/food/repeat", data={}, follow_redirects=True)
         self.assertIn(b"no longer exists", response.data)
 
 

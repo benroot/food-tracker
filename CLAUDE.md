@@ -201,6 +201,19 @@ python -m unittest discover -s tests -v
 
 ---
 
+## Development Workflow: Propose Before Implementing
+
+For a new feature idea, an enhancement, or any change that carries a real design decision, the default is a two-step conversation, not immediate code — **even when the request is phrased as a direct instruction** ("can this do X," "let's add Y"). A described feature is something to work out the shape of together first, not marching orders to build on the spot.
+
+1. **Propose first.** Respond with the intended approach: what would change, which files/routes/schema are affected, and any real tradeoffs (UX regressions, new dependencies, scope creep, alternative approaches). Do not write or edit code in this response.
+2. **Wait for explicit go-ahead.** Only implement after the user confirms the proposal, redirects it, or explicitly says to proceed.
+
+This doesn't apply to genuinely mechanical, unambiguous asks (a typo fix, a rename, a config tweak) or to implementing a plan the user has already approved earlier in the same conversation.
+
+*Why*: bundling a design decision and its implementation into one response removes the chance to redirect before code exists. E.g., swapping a native `<input type="time">` for a free-text field to support partial-hour entry was a real UX tradeoff (losing the native mobile picker) that should have been proposed and confirmed before it was built, not explained after the fact in the same turn.
+
+---
+
 ## Development Style (inferred from the related Food & Weight Log project)
 
 These aren't formally confirmed for this project yet, but are carried over as a reasonable starting point based on how that project's standards were set, and how decisions have been made in conversation so far:

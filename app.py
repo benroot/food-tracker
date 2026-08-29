@@ -208,8 +208,14 @@ def food_log_direct():
     return redirect(url_for("food_page"))
 
 
-@app.route("/food/repeat/<int:entry_id>", methods=["POST"])
-def food_repeat(entry_id):
+@app.route("/food/repeat", methods=["POST"])
+def food_repeat():
+    raw_entry_id = request.form.get("entry_id", "")
+    if not raw_entry_id.isdigit():
+        flash("That meal no longer exists.", "error")
+        return redirect(url_for("food_page"))
+    entry_id = int(raw_entry_id)
+
     db = dbmod.get_db()
     source_entry = db.execute(
         "SELECT meal_type FROM log_entries WHERE id = ?", (entry_id,)
@@ -226,9 +232,11 @@ def food_repeat(entry_id):
         return redirect(url_for("food_page"))
 
     now = datetime.now()
+    requested_time = request.form.get("entry_time", "").strip()
+    entry_time = requested_time if requested_time and TIME_PATTERN.match(requested_time) else now.strftime("%H:%M")
     cursor = db.execute(
         "INSERT INTO log_entries (entry_date, entry_time, meal_type) VALUES (?, ?, ?)",
-        (now.date().isoformat(), now.strftime("%H:%M"), source_entry["meal_type"]),
+        (now.date().isoformat(), entry_time, source_entry["meal_type"]),
     )
     new_entry_id = cursor.lastrowid
     for item in source_items:

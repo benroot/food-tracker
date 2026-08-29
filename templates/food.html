@@ -7,67 +7,84 @@
     <p class="pending-question" role="status">{{ pending_question }}</p>
   {% endif %}
 
-  <form method="post" action="{{ url_for('food_log') }}">
-    <label for="message">
-      {% if pending_question %}Your answer{% else %}What did you eat?{% endif %}
-    </label>
-    <input
-      type="text"
-      id="message"
-      name="message"
-      placeholder="e.g. two eggs and toast for breakfast"
-      required
-      autofocus
-    >
-    <button type="submit">Send</button>
-  </form>
+  <div class="tabs">
+    <input type="radio" name="tab" id="tab-chat" class="tab-input" checked>
+    <input type="radio" name="tab" id="tab-repeat" class="tab-input">
+    <input type="radio" name="tab" id="tab-direct" class="tab-input">
 
-  <section aria-label="Repeat a previous meal">
-    <h2>Repeat a previous meal</h2>
-    {% if has_repeat_options %}
-      {% for meal_type in repeatable_meal_types %}
-        {% if repeat_options[meal_type] %}
-          <div class="repeat-group">
-            <h3>{{ meal_type }}</h3>
-            <ul class="repeat-options">
-              {% for option in repeat_options[meal_type] %}
-                <li>
-                  <form method="post" action="{{ url_for('food_repeat', entry_id=option['entry_id']) }}">
-                    <button type="submit">
-                      {{ option["items"] | join(", ") }} &mdash; {{ option["total_calories"] }} cal
-                      <span class="repeat-date">{{ option["entry_date"] }}</span>
-                    </button>
-                  </form>
-                </li>
-              {% endfor %}
-            </ul>
-          </div>
-        {% endif %}
-      {% endfor %}
-    {% else %}
-      <p>Nothing to repeat yet &mdash; once you've logged a breakfast, lunch, or dinner, it'll show up here for quick re-logging.</p>
-    {% endif %}
-  </section>
+    <div class="tab-list">
+      <label for="tab-chat">Chat</label>
+      <label for="tab-repeat">Repeat a meal</label>
+      <label for="tab-direct">Log directly</label>
+    </div>
 
-  <section aria-label="Log a food item directly">
-    <h2>Log directly</h2>
-    <form method="post" action="{{ url_for('food_log_direct') }}">
-      <label for="food">Food</label>
-      <input type="text" id="food" name="food" required>
+    <section class="tab-panel" id="panel-chat" aria-label="Chat">
+      <form method="post" action="{{ url_for('food_log') }}">
+        <label for="message">
+          {% if pending_question %}Your answer{% else %}What did you eat?{% endif %}
+        </label>
+        <input
+          type="text"
+          id="message"
+          name="message"
+          placeholder="e.g. two eggs and toast for breakfast"
+          required
+          autofocus
+        >
+        <button type="submit">Send</button>
+      </form>
+    </section>
 
-      <label for="calories">Calories</label>
-      <input type="number" id="calories" name="calories" min="1" step="1" required>
+    <section class="tab-panel" id="panel-repeat" aria-label="Repeat a previous meal">
+      <h2>Repeat a previous meal</h2>
+      {% if has_repeat_options %}
+        <form method="post" action="{{ url_for('food_repeat') }}">
+          <label for="repeat_time">Log at time (optional)</label>
+          <input type="time" id="repeat_time" name="entry_time">
 
-      <label for="meal_type">Meal</label>
-      <select id="meal_type" name="meal_type" required>
-        {% for meal in meal_types %}
-          <option value="{{ meal }}">{{ meal }}</option>
-        {% endfor %}
-      </select>
+          {% for meal_type in repeatable_meal_types %}
+            {% if repeat_options[meal_type] %}
+              <div class="repeat-group">
+                <h3>{{ meal_type }}</h3>
+                <ul class="repeat-options">
+                  {% for option in repeat_options[meal_type] %}
+                    <li>
+                      <button type="submit" name="entry_id" value="{{ option['entry_id'] }}">
+                        {{ option["items"] | join(", ") }} &mdash; {{ option["total_calories"] }} cal
+                        <span class="repeat-date">{{ option["entry_date"] }}</span>
+                      </button>
+                    </li>
+                  {% endfor %}
+                </ul>
+              </div>
+            {% endif %}
+          {% endfor %}
+        </form>
+      {% else %}
+        <p>Nothing to repeat yet &mdash; once you've logged a breakfast, lunch, or dinner, it'll show up here for quick re-logging.</p>
+      {% endif %}
+    </section>
 
-      <button type="submit">Log directly</button>
-    </form>
-  </section>
+    <section class="tab-panel" id="panel-direct" aria-label="Log a food item directly">
+      <h2>Log directly</h2>
+      <form method="post" action="{{ url_for('food_log_direct') }}">
+        <label for="food">Food</label>
+        <input type="text" id="food" name="food" required>
+
+        <label for="calories">Calories</label>
+        <input type="number" id="calories" name="calories" min="1" step="1" required>
+
+        <label for="meal_type">Meal</label>
+        <select id="meal_type" name="meal_type" required>
+          {% for meal in meal_types %}
+            <option value="{{ meal }}">{{ meal }}</option>
+          {% endfor %}
+        </select>
+
+        <button type="submit">Log directly</button>
+      </form>
+    </section>
+  </div>
 
   <section aria-label="Today's entries">
     <h2>Today <span class="total">{{ total_calories }} cal</span></h2>
