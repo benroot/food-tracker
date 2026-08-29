@@ -152,6 +152,8 @@ CREATE TABLE weight_log (
 
 ## Repeatable Meals / "Log it again" Resolution
 
+This section works out the design for one specific candidate from Phase 5's "Interface enhancements" list — named meal bundles — in case that's the direction chosen. It's kept here for reference, not as a commitment; see Phase 5 for the fuller set of options (including simpler, non-bundle shortcuts) and the reasoning for not locking in one approach yet.
+
 Claude API calls are stateless — the model has no built-in memory of past conversations or database contents. Resolving something like *"log the salmon rice dish again for dinner"* requires the backend to explicitly retrieve and inject relevant context on each call; it does not happen automatically.
 
 Flow:
@@ -191,7 +193,7 @@ python -m unittest discover -s tests -v
 - `app.py` routes: exercised through Flask's test client against a scratch SQLite file (`FOOD_LOG_DB_PATH` env override, cleaned up after the run), with `claude_client.call_claude` mocked so route/DB/session logic is verified independent of the API.
 
 **How this should shape day-to-day development**:
-- A new route, or a new branch in an existing route's logic (e.g. Phase 5's bundle-matching resolution), gets a corresponding test before moving on — don't let the suite fall behind the code it's meant to describe.
+- A new route, or a new branch in an existing route's logic (e.g. Phase 4's meal-type-propagation-across-siblings edit behavior), gets a corresponding test before moving on — don't let the suite fall behind the code it's meant to describe.
 - Changing the `log_food_entry` tool schema, or the shape of Messages API response handling, means updating the mocked response fixtures in `test_claude_client.py` and `test_app.py` in the same change, not as a follow-up.
 - A `schema.sql` change that affects what a route reads or writes gets a test asserting the new columns/rows land correctly — not just a manual DB Browser check.
 - A bug fix should come with a regression test reproducing the bug where practical.
@@ -236,12 +238,18 @@ A lightweight form alongside the chat input: a food/meal label plus a calorie nu
 Add an interface on the food log page for editing or deleting an already-logged entry: correct the label or calorie count, or remove it outright if it was logged in error. Edits write directly to `log_entry_items` (and `log_entries` if the meal type also needs correcting) — a direct database update, not a re-parse through the Claude API. Editing date/time is explicitly out of scope for this phase (see Open Questions): most corrections are "wrong calorie count" or "typo in the food name," not "wrong timestamp," and it's a separable chunk of work with its own accessibility question (native `<input type="date">` + `<input type="time">` is the likely answer whenever it's tackled — see Open Questions).
 *Usable for*: fixing the inevitable case where a Claude estimate is off, a label came out mangled, or a message got sent twice by mistake — without needing to open the SQLite file by hand.
 
-### Phase 5 — Meal bundles (manual creation + reuse)
-Add `meal_bundles` / `meal_bundle_items` tables and a simple way to save a set of items as a named bundle — a manual "save this as..." action, not yet auto-detected or auto-suggested. Add matching logic so a message like "log the salmon rice dish again" resolves against saved bundle names (the `difflib` + candidate-list-in-prompt approach described above) and either logs it or asks for clarification.
-*Usable for*: real repeated-meal logging — the specific need that started this conversation.
+### Phase 5 — Interface enhancements: repeatable meals & shortcuts (candidates, not commitments)
+Several ideas for cutting down on retyping the same handful of regular meals, roughly in increasing complexity. Not all of these need to be built, and they aren't mutually exclusive — this section is for sketching them out and deciding which (if any) are worth committing to, rather than a single locked-in design like the other phases.
+
+- **Repeat-last shortcut buttons**: one button per meal type ("Repeat last Breakfast," "Repeat last Lunch," "Repeat last Dinner") that copies the most recently logged entry of that meal type — items and calories, unchanged — into a new entry for today, with today's date and the current time. Pure DB read-and-copy, no Claude API call involved, so it's instant and free. The tradeoff: it's a blunt heuristic — it repeats literally the *last* matching meal even if that one was atypical (e.g., a one-off big breakfast), with no sense of what's "typical."
+- **Recent-options variant**: instead of always repeating literally the single most recent entry, show a short summary of each of the last three logged instances of that meal type (e.g., "Omelette, juice, coffee — 550 cal, logged Tue") and let the user pick which one to repeat. Addresses the "atypical last meal" problem above at the cost of a slightly more involved UI — a small picker/list per meal type instead of one button.
+- **Meal bundles (manual save + reuse)**: the more deliberate, named-and-reusable version. Add `meal_bundles` / `meal_bundle_items` tables and a manual "save this as..." action, then match a chat message like "log the salmon rice dish again" against saved bundle names (the `difflib` + candidate-list-in-prompt approach described above) and either log it or ask for clarification. Needs new schema and more UI than the shortcut-button ideas above, but lets a meal be recalled by a memorable name rather than by recency.
+
+These can be sequenced independently — repeat-last buttons are the fastest, cheapest win and could ship well before named bundles, if repeating by name (rather than by recency) turns out to matter in practice once the simpler shortcuts are in daily use.
+*Usable for*: reducing how often a normal day's meals require typing out or dictating the same thing again — potentially without a Claude API call at all for the common case.
 
 ### Phase 6 — Unified dashboard
-Combine what Phase 1–5 built into one view — today's food entries, running total, and latest weight together — replacing the need to check separate pages.
+Combine what's built so far (Phases 1–4, plus whichever Phase 5 shortcuts ended up shipping) into one view — today's food entries, running total, and latest weight together — replacing the need to check separate pages.
 *Usable for*: full parity with the original CSV-based project, but now backed by a real database and a live web UI instead of file re-uploads.
 
 ### Phase 7 — Polish and quality-of-life (optional, only after 1–6 are solid)
