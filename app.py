@@ -11,7 +11,37 @@ from config import load_env_file
 load_env_file()
 
 MEAL_TYPES = ("Breakfast", "Lunch", "Dinner", "Snack", "Dessert", "Drink")
+REPEATABLE_MEAL_TYPES = ("Breakfast", "Lunch", "Dinner")
+RECENT_MEAL_OPTIONS_LIMIT = 3
 TIME_PATTERN = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+
+
+def _recent_meal_options(db, meal_type, before_date, limit=RECENT_MEAL_OPTIONS_LIMIT):
+    entry_rows = db.execute(
+        """
+        SELECT id, entry_date FROM log_entries
+        WHERE meal_type = ? AND entry_date < ?
+        ORDER BY entry_date DESC, entry_time DESC, id DESC
+        LIMIT ?
+        """,
+        (meal_type, before_date, limit),
+    ).fetchall()
+
+    options = []
+    for entry_row in entry_rows:
+        items = db.execute(
+            "SELECT description, calories FROM log_entry_items WHERE log_entry_id = ?",
+            (entry_row["id"],),
+        ).fetchall()
+        options.append(
+            {
+                "entry_id": entry_row["id"],
+                "entry_date": entry_row["entry_date"],
+                "items": [item["description"] for item in items],
+                "total_calories": sum(item["calories"] for item in items),
+            }
+        )
+    return options
 
 app = Flask(__name__)
 app.secret_key = secrets.token_hex(32)
@@ -63,12 +93,19 @@ def food_page():
         (today,),
     ).fetchall()
     total_calories = sum(entry["calories"] for entry in entries)
+    repeat_options = {
+        meal_type: _recent_meal_options(db, meal_type, today)
+        for meal_type in REPEATABLE_MEAL_TYPES
+    }
     return render_template(
         "food.html",
         entries=entries,
         total_calories=total_calories,
         pending_question=session.get("pending_question"),
         meal_types=MEAL_TYPES,
+        repeatable_meal_types=REPEATABLE_MEAL_TYPES,
+        repeat_options=repeat_options,
+        has_repeat_options=any(repeat_options.values()),
     )
 
 
@@ -168,6 +205,52 @@ def food_log_direct():
     db.commit()
 
     flash(f"Logged to {meal_type}: {food} ({calories} cal)", "success")
+    return redirect(url_for("food_page"))
+
+
+@app.route("/food/repeat/<int:entry_id>", methods=["POST"])
+def food_repeat(entry_id):
+    db = dbmod.get_db()
+    source_entry = db.execute(
+        "SELECT meal_type FROM log_entries WHERE id = ?", (entry_id,)
+    ).fetchone()
+    source_items = db.execute(
+        """
+        SELECT description, quantity, calories, is_estimate, assumption_note
+        FROM log_entry_items WHERE log_entry_id = ?
+        """,
+        (entry_id,),
+    ).fetchall()
+    if source_entry is None or not source_items:
+        flash("That meal no longer exists.", "error")
+        return redirect(url_for("food_page"))
+
+    now = datetime.now()
+    cursor = db.execute(
+        "INSERT INTO log_entries (entry_date, entry_time, meal_type) VALUES (?, ?, ?)",
+        (now.date().isoformat(), now.strftime("%H:%M"), source_entry["meal_type"]),
+    )
+    new_entry_id = cursor.lastrowid
+    for item in source_items:
+        db.execute(
+            """
+            INSERT INTO log_entry_items
+                (log_entry_id, description, quantity, calories, is_estimate, assumption_note)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                new_entry_id,
+                item["description"],
+                item["quantity"],
+                item["calories"],
+                item["is_estimate"],
+                item["assumption_note"],
+            ),
+        )
+    db.commit()
+
+    summary = ", ".join(f'{item["description"]} ({item["calories"]} cal)' for item in source_items)
+    flash(f'Logged to {source_entry["meal_type"]}: {summary}', "success")
     return redirect(url_for("food_page"))
 
 

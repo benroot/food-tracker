@@ -113,6 +113,49 @@ td {
   padding: 0.3rem 0.6rem;
 }
 
+.repeat-group {
+  margin-bottom: 1rem;
+}
+
+.repeat-group h3 {
+  font-size: 1rem;
+  margin-bottom: 0.4rem;
+}
+
+.repeat-options {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-width: 24rem;
+}
+
+.repeat-options form {
+  display: contents;
+}
+
+.repeat-options button {
+  width: 100%;
+  text-align: left;
+  background: var(--bg);
+  color: var(--text);
+  font-weight: 400;
+}
+
+.repeat-options button:hover,
+.repeat-options button:focus-visible {
+  border-color: var(--accent);
+}
+
+.repeat-date {
+  display: block;
+  font-size: 0.8rem;
+  color: #666;
+  margin-top: 0.15rem;
+}
+
 .estimate-tag {
   font-size: 0.75rem;
   color: #666;

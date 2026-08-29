@@ -22,6 +22,33 @@
     <button type="submit">Send</button>
   </form>
 
+  <section aria-label="Repeat a previous meal">
+    <h2>Repeat a previous meal</h2>
+    {% if has_repeat_options %}
+      {% for meal_type in repeatable_meal_types %}
+        {% if repeat_options[meal_type] %}
+          <div class="repeat-group">
+            <h3>{{ meal_type }}</h3>
+            <ul class="repeat-options">
+              {% for option in repeat_options[meal_type] %}
+                <li>
+                  <form method="post" action="{{ url_for('food_repeat', entry_id=option['entry_id']) }}">
+                    <button type="submit">
+                      {{ option["items"] | join(", ") }} &mdash; {{ option["total_calories"] }} cal
+                      <span class="repeat-date">{{ option["entry_date"] }}</span>
+                    </button>
+                  </form>
+                </li>
+              {% endfor %}
+            </ul>
+          </div>
+        {% endif %}
+      {% endfor %}
+    {% else %}
+      <p>Nothing to repeat yet &mdash; once you've logged a breakfast, lunch, or dinner, it'll show up here for quick re-logging.</p>
+    {% endif %}
+  </section>
+
   <section aria-label="Log a food item directly">
     <h2>Log directly</h2>
     <form method="post" action="{{ url_for('food_log_direct') }}">

@@ -2,6 +2,7 @@ import os
 import sqlite3
 import tempfile
 import unittest
+from datetime import date
 from unittest.mock import patch
 
 _db_fd, _db_path = tempfile.mkstemp(suffix=".db")
@@ -342,6 +343,91 @@ class EditDeleteEntryRouteTests(FoodTrackerTestCase):
 
     def test_delete_nonexistent_item_flashes_error_and_redirects(self):
         response = self.client.post("/food/entries/9999/delete", follow_redirects=True)
+        self.assertIn(b"no longer exists", response.data)
+
+
+class RepeatMealRouteTests(FoodTrackerTestCase):
+    def _seed_past_entry(self, entry_date, meal_type, items):
+        with sqlite3.connect(dbmod.DB_PATH) as conn:
+            cursor = conn.execute(
+                "INSERT INTO log_entries (entry_date, entry_time, meal_type) VALUES (?, '08:00', ?)",
+                (entry_date, meal_type),
+            )
+            entry_id = cursor.lastrowid
+            for description, calories, is_estimate, assumption_note in items:
+                conn.execute(
+                    """
+                    INSERT INTO log_entry_items
+                        (log_entry_id, description, calories, is_estimate, assumption_note)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (entry_id, description, calories, is_estimate, assumption_note),
+                )
+        return entry_id
+
+    def test_food_page_shows_up_to_three_most_recent_breakfasts_newest_first(self):
+        self._seed_past_entry("2026-08-19", "Breakfast", [("Cereal", 180, 0, None)])
+        self._seed_past_entry("2026-08-20", "Breakfast", [("Oatmeal", 200, 0, None)])
+        self._seed_past_entry("2026-08-22", "Breakfast", [("Omelette", 400, 0, None)])
+        self._seed_past_entry("2026-08-21", "Breakfast", [("Toast", 150, 0, None)])
+
+        response = self.client.get("/")
+        body = response.data.decode()
+
+        self.assertIn("Omelette", body)
+        self.assertIn("Toast", body)
+        self.assertIn("Oatmeal", body)
+        self.assertNotIn("Cereal", body)
+        self.assertLess(body.index("Omelette"), body.index("Toast"))
+        self.assertLess(body.index("Toast"), body.index("Oatmeal"))
+
+    def test_todays_own_entry_is_excluded_from_repeat_options(self):
+        today = date.today().isoformat()
+        self._seed_past_entry(today, "Breakfast", [("Pancakes", 300, 0, None)])
+
+        response = self.client.get("/")
+
+        self.assertIn(b"Nothing to repeat yet", response.data)
+
+    def test_only_breakfast_lunch_dinner_are_repeatable(self):
+        self._seed_past_entry("2026-08-20", "Snack", [("Chips", 150, 0, None)])
+
+        response = self.client.get("/")
+
+        self.assertIn(b"Nothing to repeat yet", response.data)
+
+    def test_empty_state_when_no_past_meals(self):
+        response = self.client.get("/")
+        self.assertIn(b"Nothing to repeat yet", response.data)
+
+    def test_repeating_a_meal_copies_items_to_today_preserving_estimate_flag(self):
+        entry_id = self._seed_past_entry(
+            "2026-08-20",
+            "Breakfast",
+            [("Omelette", 400, 0, None), ("Juice", 110, 1, "Assumed 8oz")],
+        )
+
+        response = self.client.post(f"/food/repeat/{entry_id}", follow_redirects=True)
+
+        self.assertIn(b"Omelette", response.data)
+        with sqlite3.connect(dbmod.DB_PATH) as conn:
+            today_rows = conn.execute(
+                """
+                SELECT lei.description, lei.calories, lei.is_estimate, lei.assumption_note, le.meal_type
+                FROM log_entry_items lei
+                JOIN log_entries le ON le.id = lei.log_entry_id
+                WHERE le.entry_date = ?
+                ORDER BY lei.id
+                """,
+                (date.today().isoformat(),),
+            ).fetchall()
+        self.assertEqual(len(today_rows), 2)
+        self.assertEqual(today_rows[0][:4], ("Omelette", 400, 0, None))
+        self.assertEqual(today_rows[1][:4], ("Juice", 110, 1, "Assumed 8oz"))
+        self.assertEqual(today_rows[0][4], "Breakfast")
+
+    def test_repeating_nonexistent_entry_flashes_error(self):
+        response = self.client.post("/food/repeat/9999", follow_redirects=True)
         self.assertIn(b"no longer exists", response.data)
 
 
