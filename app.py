@@ -178,6 +178,10 @@ def food_page():
         (today,),
     ).fetchall()
     total_calories = sum(entry["calories"] for entry in entries)
+    calories_burned = db.execute(
+        "SELECT COALESCE(SUM(calories_burned), 0) FROM exercise_log WHERE entry_date = ?",
+        (today,),
+    ).fetchone()[0]
     repeat_options = {
         meal_type: _recent_meal_options(db, meal_type, today)
         for meal_type in REPEATABLE_MEAL_TYPES
@@ -186,6 +190,8 @@ def food_page():
         "food.html",
         entries=entries,
         total_calories=total_calories,
+        calories_burned=calories_burned,
+        net_calories=total_calories - calories_burned,
         pending_question=session.get("pending_question"),
         meal_types=MEAL_TYPES,
         repeatable_meal_types=REPEATABLE_MEAL_TYPES,

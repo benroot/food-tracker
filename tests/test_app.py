@@ -356,6 +356,38 @@ class FoodPageOrderingTests(FoodTrackerTestCase):
         self.assertLess(body.index("Toast"), body.index("Coffee"))
 
 
+class NetCaloriesDisplayTests(FoodTrackerTestCase):
+    def test_plain_total_shown_when_no_exercise_logged_today(self):
+        self.client.post(
+            "/food/log-direct",
+            data={"food": "Toast", "calories": "150", "meal_type": "Breakfast"},
+        )
+
+        response = self.client.get("/")
+
+        self.assertIn(b"150 cal</span>", response.data)
+        self.assertNotIn(b"cal net", response.data)
+        self.assertNotIn(b"consumed", response.data)
+
+    def test_net_calories_shown_when_exercise_logged_today(self):
+        self.client.post(
+            "/food/log-direct",
+            data={"food": "Toast", "calories": "150", "meal_type": "Breakfast"},
+        )
+        with sqlite3.connect(dbmod.DB_PATH) as conn:
+            conn.execute(
+                "INSERT INTO exercise_log (entry_date, entry_time, activity, calories_burned) "
+                "VALUES (?, '07:00', 'Ran 3 miles', 350)",
+                (date.today().isoformat(),),
+            )
+
+        response = self.client.get("/")
+
+        self.assertIn(b"-200 cal net", response.data)
+        self.assertIn(b"150 consumed", response.data)
+        self.assertIn(b"350 burned", response.data)
+
+
 class EditDeleteEntryRouteTests(FoodTrackerTestCase):
     def _create_single_item_entry(self, food="Toast", calories=120, meal_type="Breakfast"):
         self.client.post(

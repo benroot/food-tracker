@@ -87,7 +87,15 @@
   </div>
 
   <section aria-label="Today's entries">
-    <h2>Today <span class="total">{{ total_calories }} cal</span></h2>
+    <h2>
+      Today
+      {% if calories_burned %}
+        <span class="total">{{ net_calories }} cal net</span>
+        <span class="calorie-breakdown">{{ total_calories }} consumed &minus; {{ calories_burned }} burned</span>
+      {% else %}
+        <span class="total">{{ total_calories }} cal</span>
+      {% endif %}
+    </h2>
     {% if entries %}
       <table>
         <thead>

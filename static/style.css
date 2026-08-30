@@ -127,6 +127,14 @@ nav a:focus-visible {
   margin-left: 0.5rem;
 }
 
+.calorie-breakdown {
+  display: block;
+  font-weight: 400;
+  color: #666;
+  font-size: 0.8rem;
+  margin-top: 0.15rem;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
