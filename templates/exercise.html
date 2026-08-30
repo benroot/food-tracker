@@ -9,10 +9,12 @@
 
   <div class="tabs">
     <input type="radio" name="tab" id="tab-chat" class="tab-input" checked>
+    <input type="radio" name="tab" id="tab-repeat" class="tab-input">
     <input type="radio" name="tab" id="tab-direct" class="tab-input">
 
     <div class="tab-list">
       <label for="tab-chat">Chat</label>
+      <label for="tab-repeat">Repeat an activity</label>
       <label for="tab-direct">Log directly</label>
     </div>
 
@@ -31,6 +33,29 @@
         >
         <button type="submit">Send</button>
       </form>
+    </section>
+
+    <section class="tab-panel" id="panel-repeat" aria-label="Repeat a previous activity">
+      <h2>Repeat a previous activity</h2>
+      {% if repeat_options %}
+        <form method="post" action="{{ url_for('exercise_repeat') }}">
+          <label for="repeat_time">Log at time (optional)</label>
+          <input type="time" id="repeat_time" name="entry_time">
+
+          <ul class="repeat-options">
+            {% for option in repeat_options %}
+              <li>
+                <button type="submit" name="entry_id" value="{{ option['entry_id'] }}">
+                  {{ option["activity"] }} &mdash; {{ option["calories_burned"] }} cal
+                  <span class="repeat-date">{{ option["entry_date"] }}</span>
+                </button>
+              </li>
+            {% endfor %}
+          </ul>
+        </form>
+      {% else %}
+        <p>Nothing to repeat yet &mdash; once you've logged an activity, it'll show up here for quick re-logging.</p>
+      {% endif %}
     </section>
 
     <section class="tab-panel" id="panel-direct" aria-label="Log directly">

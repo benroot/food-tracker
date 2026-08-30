@@ -397,6 +397,81 @@ class EditDeleteExerciseEntryRouteTests(FoodTrackerTestCase):
         self.assertIn(b"no longer exists", response.data)
 
 
+class RepeatExerciseRouteTests(FoodTrackerTestCase):
+    def _seed_past_entry(self, entry_date, activity, calories):
+        with sqlite3.connect(dbmod.DB_PATH) as conn:
+            cursor = conn.execute(
+                "INSERT INTO exercise_log (entry_date, entry_time, activity, calories_burned) "
+                "VALUES (?, '08:00', ?, ?)",
+                (entry_date, activity, calories),
+            )
+            return cursor.lastrowid
+
+    def test_exercise_page_shows_up_to_three_most_recent_newest_first(self):
+        self._seed_past_entry("2026-08-19", "Cereal walk", 50)
+        self._seed_past_entry("2026-08-20", "Yoga", 120)
+        self._seed_past_entry("2026-08-22", "Ran 3 miles", 350)
+        self._seed_past_entry("2026-08-21", "Pushups", 50)
+
+        response = self.client.get("/exercise")
+        body = response.data.decode()
+
+        self.assertIn("Ran 3 miles", body)
+        self.assertIn("Pushups", body)
+        self.assertIn("Yoga", body)
+        self.assertNotIn("Cereal walk", body)
+        self.assertLess(body.index("Ran 3 miles"), body.index("Pushups"))
+        self.assertLess(body.index("Pushups"), body.index("Yoga"))
+
+    def test_todays_own_entry_is_included_in_repeat_options(self):
+        today = date.today().isoformat()
+        self._seed_past_entry(today, "Cycled to work", 200)
+
+        response = self.client.get("/exercise")
+
+        self.assertIn(b"Cycled to work", response.data)
+        self.assertNotIn(b"Nothing to repeat yet", response.data)
+
+    def test_repeating_an_activity_copies_it_to_today(self):
+        entry_id = self._seed_past_entry("2026-08-20", "Ran 3 miles", 350)
+
+        response = self.client.post(
+            "/exercise/repeat", data={"entry_id": str(entry_id)}, follow_redirects=True
+        )
+
+        self.assertIn(b"Ran 3 miles", response.data)
+        with sqlite3.connect(dbmod.DB_PATH) as conn:
+            row = conn.execute(
+                "SELECT activity, calories_burned FROM exercise_log WHERE entry_date = ?",
+                (date.today().isoformat(),),
+            ).fetchone()
+        self.assertEqual(row, ("Ran 3 miles", 350))
+
+    def test_repeating_with_explicit_time_uses_that_time(self):
+        entry_id = self._seed_past_entry("2026-08-20", "Ran 3 miles", 350)
+
+        self.client.post(
+            "/exercise/repeat", data={"entry_id": str(entry_id), "entry_time": "06:30"}
+        )
+
+        with sqlite3.connect(dbmod.DB_PATH) as conn:
+            entry_time = conn.execute(
+                "SELECT entry_time FROM exercise_log WHERE entry_date = ?",
+                (date.today().isoformat(),),
+            ).fetchone()[0]
+        self.assertEqual(entry_time, "06:30")
+
+    def test_repeating_nonexistent_entry_flashes_error(self):
+        response = self.client.post(
+            "/exercise/repeat", data={"entry_id": "9999"}, follow_redirects=True
+        )
+        self.assertIn(b"no longer exists", response.data)
+
+    def test_repeating_with_missing_entry_id_flashes_error(self):
+        response = self.client.post("/exercise/repeat", data={}, follow_redirects=True)
+        self.assertIn(b"no longer exists", response.data)
+
+
 class ManualFoodLogRouteTests(FoodTrackerTestCase):
     def test_valid_entry_writes_to_db_as_non_estimate_without_calling_claude(self):
         with patch("claude_client.call_claude") as mock_call_claude:
@@ -681,13 +756,14 @@ class RepeatMealRouteTests(FoodTrackerTestCase):
         self.assertLess(body.index("Omelette"), body.index("Toast"))
         self.assertLess(body.index("Toast"), body.index("Oatmeal"))
 
-    def test_todays_own_entry_is_excluded_from_repeat_options(self):
+    def test_todays_own_entry_is_included_in_repeat_options(self):
         today = date.today().isoformat()
         self._seed_past_entry(today, "Breakfast", [("Pancakes", 300, 0, None)])
 
         response = self.client.get("/")
 
-        self.assertIn(b"Nothing to repeat yet", response.data)
+        self.assertIn(b"Pancakes", response.data)
+        self.assertNotIn(b"Nothing to repeat yet", response.data)
 
     def test_only_breakfast_lunch_dinner_are_repeatable(self):
         self._seed_past_entry("2026-08-20", "Snack", [("Chips", 150, 0, None)])

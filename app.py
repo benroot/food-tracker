@@ -12,19 +12,21 @@ load_env_file()
 
 MEAL_TYPES = ("Breakfast", "Lunch", "Dinner", "Snack", "Dessert", "Drink")
 REPEATABLE_MEAL_TYPES = ("Breakfast", "Lunch", "Dinner")
-RECENT_MEAL_OPTIONS_LIMIT = 3
+RECENT_OPTIONS_LIMIT = 3
 TIME_PATTERN = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 
-def _recent_meal_options(db, meal_type, before_date, limit=RECENT_MEAL_OPTIONS_LIMIT):
+def _recent_meal_options(db, meal_type, limit=RECENT_OPTIONS_LIMIT):
+    # Today's own entries are included -- repeating the same meal twice in
+    # one day is a legitimate case, not just a same-day-repeat edge case.
     entry_rows = db.execute(
         """
         SELECT id, entry_date FROM log_entries
-        WHERE meal_type = ? AND entry_date < ?
+        WHERE meal_type = ?
         ORDER BY entry_date DESC, entry_time DESC, id DESC
         LIMIT ?
         """,
-        (meal_type, before_date, limit),
+        (meal_type, limit),
     ).fetchall()
 
     options = []
@@ -42,6 +44,30 @@ def _recent_meal_options(db, meal_type, before_date, limit=RECENT_MEAL_OPTIONS_L
             }
         )
     return options
+
+
+def _recent_exercise_options(db, limit=RECENT_OPTIONS_LIMIT):
+    # Today's own entries are included -- repeating the same activity twice
+    # in one day (e.g. cycling to work, then back) is a real, common case.
+    rows = db.execute(
+        """
+        SELECT id, entry_date, activity, calories_burned
+        FROM exercise_log
+        ORDER BY entry_date DESC, entry_time DESC, id DESC
+        LIMIT ?
+        """,
+        (limit,),
+    ).fetchall()
+    return [
+        {
+            "entry_id": row["id"],
+            "entry_date": row["entry_date"],
+            "activity": row["activity"],
+            "calories_burned": row["calories_burned"],
+        }
+        for row in rows
+    ]
+
 
 app = Flask(__name__)
 app.secret_key = secrets.token_hex(32)
@@ -90,11 +116,13 @@ def exercise_page():
         (today,),
     ).fetchall()
     total_calories_burned = sum(entry["calories_burned"] for entry in entries)
+    repeat_options = _recent_exercise_options(db)
     return render_template(
         "exercise.html",
         entries=entries,
         total_calories_burned=total_calories_burned,
         pending_question=session.get("pending_exercise_question"),
+        repeat_options=repeat_options,
     )
 
 
@@ -258,6 +286,50 @@ def exercise_entry_delete(entry_id):
     return redirect(url_for("exercise_page"))
 
 
+@app.route("/exercise/repeat", methods=["POST"])
+def exercise_repeat():
+    raw_entry_id = request.form.get("entry_id", "")
+    if not raw_entry_id.isdigit():
+        flash("That activity no longer exists.", "error")
+        return redirect(url_for("exercise_page"))
+    entry_id = int(raw_entry_id)
+
+    db = dbmod.get_db()
+    source = db.execute(
+        """
+        SELECT activity, calories_burned, is_estimate, assumption_note
+        FROM exercise_log WHERE id = ?
+        """,
+        (entry_id,),
+    ).fetchone()
+    if source is None:
+        flash("That activity no longer exists.", "error")
+        return redirect(url_for("exercise_page"))
+
+    now = datetime.now()
+    requested_time = request.form.get("entry_time", "").strip()
+    entry_time = requested_time if requested_time and TIME_PATTERN.match(requested_time) else now.strftime("%H:%M")
+    db.execute(
+        """
+        INSERT INTO exercise_log
+            (entry_date, entry_time, activity, calories_burned, is_estimate, assumption_note)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            now.date().isoformat(),
+            entry_time,
+            source["activity"],
+            source["calories_burned"],
+            source["is_estimate"],
+            source["assumption_note"],
+        ),
+    )
+    db.commit()
+
+    flash(f'Logged: {source["activity"]} ({source["calories_burned"]} cal)', "success")
+    return redirect(url_for("exercise_page"))
+
+
 @app.route("/", methods=["GET"])
 def food_page():
     db = dbmod.get_db()
@@ -280,7 +352,7 @@ def food_page():
         (today,),
     ).fetchone()[0]
     repeat_options = {
-        meal_type: _recent_meal_options(db, meal_type, today)
+        meal_type: _recent_meal_options(db, meal_type)
         for meal_type in REPEATABLE_MEAL_TYPES
     }
     return render_template(
