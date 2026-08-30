@@ -215,6 +215,25 @@ class ManualFoodLogRouteTests(FoodTrackerTestCase):
         self.assertEqual(count, 0)
 
 
+class FoodPageOrderingTests(FoodTrackerTestCase):
+    def test_todays_entries_show_most_recently_logged_first(self):
+        self.client.post(
+            "/food/log-direct",
+            data={"food": "Coffee", "calories": "5", "meal_type": "Breakfast"},
+            follow_redirects=True,
+        )
+        self.client.post(
+            "/food/log-direct",
+            data={"food": "Toast", "calories": "150", "meal_type": "Breakfast"},
+            follow_redirects=True,
+        )
+
+        response = self.client.get("/")
+        body = response.data.decode()
+
+        self.assertLess(body.index("Toast"), body.index("Coffee"))
+
+
 class EditDeleteEntryRouteTests(FoodTrackerTestCase):
     def _create_single_item_entry(self, food="Toast", calories=120, meal_type="Breakfast"):
         self.client.post(

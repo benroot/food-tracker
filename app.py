@@ -88,7 +88,7 @@ def food_page():
         FROM log_entries le
         JOIN log_entry_items lei ON lei.log_entry_id = le.id
         WHERE le.entry_date = ?
-        ORDER BY le.entry_time, lei.id
+        ORDER BY le.entry_time DESC, le.id DESC, lei.id ASC
         """,
         (today,),
     ).fetchall()
