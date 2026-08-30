@@ -270,6 +270,61 @@ class ExerciseLogRouteTests(FoodTrackerTestCase):
         self.assertIn(b"Ran 3 miles", response.data)
 
 
+class ManualExerciseLogRouteTests(FoodTrackerTestCase):
+    def test_valid_entry_writes_to_db_as_non_estimate_without_calling_claude(self):
+        with patch("claude_client.call_claude") as mock_call_claude:
+            response = self.client.post(
+                "/exercise/log-direct",
+                data={"activity": "Pushups", "calories": "50"},
+                follow_redirects=True,
+            )
+            mock_call_claude.assert_not_called()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Pushups", response.data)
+        with sqlite3.connect(dbmod.DB_PATH) as conn:
+            row = conn.execute(
+                "SELECT activity, calories_burned, is_estimate FROM exercise_log"
+            ).fetchone()
+        self.assertEqual(row, ("Pushups", 50, 0))
+
+    def test_missing_activity_does_not_write_and_flashes_error(self):
+        response = self.client.post(
+            "/exercise/log-direct",
+            data={"activity": "", "calories": "50"},
+            follow_redirects=True,
+        )
+
+        self.assertIn(b"Enter an activity", response.data)
+        with sqlite3.connect(dbmod.DB_PATH) as conn:
+            count = conn.execute("SELECT COUNT(*) FROM exercise_log").fetchone()[0]
+        self.assertEqual(count, 0)
+
+    def test_non_numeric_calories_does_not_write_and_flashes_error(self):
+        response = self.client.post(
+            "/exercise/log-direct",
+            data={"activity": "Pushups", "calories": "a lot"},
+            follow_redirects=True,
+        )
+
+        self.assertIn(b"whole number", response.data)
+        with sqlite3.connect(dbmod.DB_PATH) as conn:
+            count = conn.execute("SELECT COUNT(*) FROM exercise_log").fetchone()[0]
+        self.assertEqual(count, 0)
+
+    def test_zero_calories_is_rejected(self):
+        response = self.client.post(
+            "/exercise/log-direct",
+            data={"activity": "Stretching", "calories": "0"},
+            follow_redirects=True,
+        )
+
+        self.assertIn(b"whole number", response.data)
+        with sqlite3.connect(dbmod.DB_PATH) as conn:
+            count = conn.execute("SELECT COUNT(*) FROM exercise_log").fetchone()[0]
+        self.assertEqual(count, 0)
+
+
 class ManualFoodLogRouteTests(FoodTrackerTestCase):
     def test_valid_entry_writes_to_db_as_non_estimate_without_calling_claude(self):
         with patch("claude_client.call_claude") as mock_call_claude:

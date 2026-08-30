@@ -161,6 +161,39 @@ def exercise_log():
     return redirect(url_for("exercise_page"))
 
 
+@app.route("/exercise/log-direct", methods=["POST"])
+def exercise_log_direct():
+    activity = request.form.get("activity", "").strip()
+    calories_raw = request.form.get("calories", "").strip()
+
+    if not activity:
+        flash("Enter an activity.", "error")
+        return redirect(url_for("exercise_page"))
+
+    try:
+        calories = int(calories_raw)
+        if calories <= 0:
+            raise ValueError
+    except ValueError:
+        flash("Calories must be a whole number greater than 0.", "error")
+        return redirect(url_for("exercise_page"))
+
+    db = dbmod.get_db()
+    now = datetime.now()
+    db.execute(
+        """
+        INSERT INTO exercise_log
+            (entry_date, entry_time, activity, calories_burned, is_estimate)
+        VALUES (?, ?, ?, ?, 0)
+        """,
+        (now.date().isoformat(), now.strftime("%H:%M"), activity, calories),
+    )
+    db.commit()
+
+    flash(f"Logged: {activity} ({calories} cal)", "success")
+    return redirect(url_for("exercise_page"))
+
+
 @app.route("/", methods=["GET"])
 def food_page():
     db = dbmod.get_db()

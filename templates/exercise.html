@@ -7,20 +7,45 @@
     <p class="pending-question" role="status">{{ pending_question }}</p>
   {% endif %}
 
-  <form method="post" action="{{ url_for('exercise_log') }}">
-    <label for="message">
-      {% if pending_question %}Your answer{% else %}What did you do?{% endif %}
-    </label>
-    <input
-      type="text"
-      id="message"
-      name="message"
-      placeholder="e.g. ran 3 miles this morning"
-      required
-      autofocus
-    >
-    <button type="submit">Send</button>
-  </form>
+  <div class="tabs">
+    <input type="radio" name="tab" id="tab-chat" class="tab-input" checked>
+    <input type="radio" name="tab" id="tab-direct" class="tab-input">
+
+    <div class="tab-list">
+      <label for="tab-chat">Chat</label>
+      <label for="tab-direct">Log directly</label>
+    </div>
+
+    <section class="tab-panel" id="panel-chat" aria-label="Chat">
+      <form method="post" action="{{ url_for('exercise_log') }}">
+        <label for="message">
+          {% if pending_question %}Your answer{% else %}What did you do?{% endif %}
+        </label>
+        <input
+          type="text"
+          id="message"
+          name="message"
+          placeholder="e.g. ran 3 miles this morning"
+          required
+          autofocus
+        >
+        <button type="submit">Send</button>
+      </form>
+    </section>
+
+    <section class="tab-panel" id="panel-direct" aria-label="Log directly">
+      <h2>Log directly</h2>
+      <form method="post" action="{{ url_for('exercise_log_direct') }}">
+        <label for="activity">Activity</label>
+        <input type="text" id="activity" name="activity" required>
+
+        <label for="calories">Calories</label>
+        <input type="number" id="calories" name="calories" min="1" step="1" required>
+
+        <button type="submit">Log directly</button>
+      </form>
+    </section>
+  </div>
 
   <section aria-label="Today's activities">
     <h2>Today <span class="total">{{ total_calories_burned }} cal burned</span></h2>
