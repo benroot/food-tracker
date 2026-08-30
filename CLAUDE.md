@@ -144,6 +144,20 @@ CREATE TABLE weight_log (
     entry_date TEXT NOT NULL UNIQUE,
     weight_lbs REAL NOT NULL
 );
+
+-- One row per logged exercise activity. Deliberately flat (unlike log_entries/
+-- log_entry_items) since one exercise entry is naturally one activity, with no
+-- multi-item-meal-style need for a child table. See Exercise Logging Phases.
+CREATE TABLE exercise_log (
+    id INTEGER PRIMARY KEY,
+    entry_date TEXT NOT NULL,
+    entry_time TEXT NOT NULL,
+    activity TEXT NOT NULL,
+    calories_burned INTEGER NOT NULL,
+    is_estimate INTEGER NOT NULL DEFAULT 0,
+    assumption_note TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 ```
 
 **Deliberate design note**: `log_entry_items` copies calorie values at the time of logging rather than only referencing `meal_bundle_items` by foreign key. This is intentional, not an oversight — if a bundle's recipe is edited later (e.g. less olive oil), past logged entries shouldn't silently change. Reference data (`food_items`, `meal_bundles`) stays normalized and editable; logged history (`log_entries`, `log_entry_items`) stays an immutable snapshot. Event-log tables and reference-catalog tables are allowed to follow different rules on purpose.
@@ -273,6 +287,32 @@ Candidates, not commitments: a considered color palette and typographic scale be
 *Usable for*: nothing new becomes usable that wasn't already — this phase makes daily use of the already-complete app more pleasant, not more capable.
 
 Each phase boundary is a reasonable point to stop, use the app for real, and decide whether the next phase is worth building yet — not a forced march to Phase 8.
+
+---
+
+## Exercise Logging Phases
+
+A new, independent tracking domain alongside food and weight — not gated on finishing Phases 1–8 above, since it's a parallel feature area rather than a continuation of the same sequence. Introduces `exercise_log` (see Database Schema) and a new `/exercise` page. Numbered X1–X5 to keep it visually distinct from the food/weight roadmap above.
+
+### Phase X1 — AI-parsed exercise logging
+Introduce a new `log_exercise_entry` tool, mirroring `log_food_entry`'s forced tool-call pattern and reusing the existing `claude_client.py` request/response plumbing: parses something like "ran 3 miles this morning" into an activity description, estimated calories burned, `is_estimate`, `assumption_note`, and (reusing the same parsing logic already built for food) an optional explicit `entry_time`. Writes to `exercise_log`. A new `/exercise` page shows today's activities and a calories-burned total. Single entry mode only (chat) — no tabs needed yet, same reasoning as why food's Phase 2 didn't have tabs either.
+*Usable for*: the core value of this feature — logging exercise in natural language and getting an AI-estimated calorie equivalent, the same way food logging already works.
+
+### Phase X2 — Net calories on the food page
+Add a consumed-minus-burned line to the food page's "Today" summary, computed by reading both `log_entry_items` and `exercise_log` for the current date at render time — no schema coupling between the two logs, just a display-time subtraction. This is the payoff motivating the whole feature, and it fulfills part of what Phase 6 (Unified dashboard) above already gestured at.
+*Usable for*: seeing actual net calories for the day, not just calories consumed, directly on the page already in daily use.
+
+### Phase X3 — Direct manual exercise entry + tabbed page structure
+Add a lightweight form (activity label + calories-burned number, `is_estimate = 0`) for when the calorie burn is already known (e.g., from a fitness tracker) or the API is unavailable — mirrors food's Phase 3. This brings `/exercise` to two entry modes, the same threshold that justified tabs on the food page, so this phase also converts `/exercise` to the same CSS radio-button tab pattern (chat / direct entry) rather than letting two stacked forms sit cluttered.
+*Usable for*: logging exercise with a known calorie count without spending an API call, and a page that stays uncluttered as a second entry mode is added.
+
+### Phase X4 — Edit/delete for exercise entries
+Add edit/delete for already-logged exercise entries, mirroring food's Phase 4: correct the activity description or calorie count, or remove an entry logged in error. A direct database update, not a re-parse.
+*Usable for*: fixing an off AI estimate or a duplicate entry without touching the SQLite file by hand.
+
+### Phase X5 — Repeat-exercise shortcuts
+A cost/friction-avoidance feature, not polish: let a previously-logged activity be re-logged in one click with zero API calls, mirroring food's repeat-a-meal buttons ("same run as yesterday"). Because the tab structure already exists from Phase X3, this slots in as a third tab rather than requiring new UI infrastructure.
+*Usable for*: avoiding an AI call entirely for the common case of repeating a familiar workout.
 
 ---
 
