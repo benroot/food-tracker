@@ -37,3 +37,17 @@ CREATE TABLE IF NOT EXISTS log_entry_items (
     is_estimate INTEGER NOT NULL DEFAULT 0,
     assumption_note TEXT
 );
+
+-- One row per logged exercise activity. Deliberately flat (unlike log_entries/
+-- log_entry_items) since one exercise entry is naturally one activity, with no
+-- multi-item-meal-style need for a child table. See Exercise Logging Phases.
+CREATE TABLE IF NOT EXISTS exercise_log (
+    id INTEGER PRIMARY KEY,
+    entry_date TEXT NOT NULL,
+    entry_time TEXT NOT NULL,
+    activity TEXT NOT NULL,
+    calories_burned INTEGER NOT NULL,
+    is_estimate INTEGER NOT NULL DEFAULT 0,
+    assumption_note TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);

@@ -67,7 +67,48 @@ LOG_FOOD_ENTRY_TOOL = {
 }
 
 
-def call_claude(messages):
+EXERCISE_SYSTEM_PROMPT = (
+    "You parse a single-user exercise log message into a structured entry "
+    "with an estimated calorie equivalent burned. Use your best judgment "
+    "for typical calorie burn given the activity, duration, and intensity "
+    "described, and mark the estimate with a short assumption note. If the "
+    "message describes more than one activity (e.g. 'ran 2 miles then did "
+    "20 pushups'), combine them into a single descriptive activity summary "
+    "with the total calories burned summed across them -- there is one "
+    "entry per message, not one per activity. Only ask for clarification "
+    "when the message is genuinely ambiguous about what activity was done "
+    "-- don't ask about things you can reasonably assume. If the message "
+    "explicitly states what time the activity happened (e.g. 'at 7am', "
+    "'around 6pm'), set entry_time to that time in 24-hour HH:MM format. "
+    "If no time is stated, omit entry_time entirely so the app can "
+    "default to the current time."
+)
+
+LOG_EXERCISE_ENTRY_TOOL = {
+    "name": "log_exercise_entry",
+    "description": "Log one exercise activity parsed from the user's message, with an estimated calorie equivalent burned.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "activity": {"type": "string"},
+            "estimated_calories_burned": {"type": "integer"},
+            "is_estimate": {"type": "boolean"},
+            "assumption_note": {"type": "string"},
+            "entry_time": {
+                "type": "string",
+                "description": "24-hour HH:MM time the activity was done, only if explicitly stated in the message. Omit if no time was mentioned.",
+            },
+            "needs_clarification": {"type": "boolean"},
+            "clarification_question": {"type": "string"},
+        },
+        "required": ["activity", "estimated_calories_burned", "is_estimate", "needs_clarification"],
+    },
+}
+
+
+def call_claude(messages, tool=None, system_prompt=None):
+    tool = tool or LOG_FOOD_ENTRY_TOOL
+    system_prompt = system_prompt or SYSTEM_PROMPT
     response = requests.post(
         API_URL,
         headers={
@@ -78,9 +119,9 @@ def call_claude(messages):
         json={
             "model": MODEL,
             "max_tokens": 1024,
-            "system": SYSTEM_PROMPT,
-            "tools": [LOG_FOOD_ENTRY_TOOL],
-            "tool_choice": {"type": "tool", "name": "log_food_entry"},
+            "system": system_prompt,
+            "tools": [tool],
+            "tool_choice": {"type": "tool", "name": tool["name"]},
             "messages": messages,
         },
     )

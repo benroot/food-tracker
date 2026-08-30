@@ -76,6 +76,91 @@ def log_weight():
     return redirect(url_for("index"))
 
 
+@app.route("/exercise", methods=["GET"])
+def exercise_page():
+    db = dbmod.get_db()
+    today = date.today().isoformat()
+    entries = db.execute(
+        """
+        SELECT id, entry_time, activity, calories_burned, is_estimate, assumption_note
+        FROM exercise_log
+        WHERE entry_date = ?
+        ORDER BY entry_time DESC, id DESC
+        """,
+        (today,),
+    ).fetchall()
+    total_calories_burned = sum(entry["calories_burned"] for entry in entries)
+    return render_template(
+        "exercise.html",
+        entries=entries,
+        total_calories_burned=total_calories_burned,
+        pending_question=session.get("pending_exercise_question"),
+    )
+
+
+def _describe_logged_exercise(tool_input):
+    description = f'{tool_input["activity"]} ({tool_input["estimated_calories_burned"]} cal)'
+    if tool_input.get("assumption_note"):
+        description += f' -- {tool_input["assumption_note"]}'
+    return description
+
+
+@app.route("/exercise/log", methods=["POST"])
+def exercise_log():
+    user_message = request.form.get("message", "").strip()
+    if not user_message:
+        return redirect(url_for("exercise_page"))
+
+    history = session.get("pending_exercise_conversation", [])
+    messages = history + [claude_client.build_user_turn(history, user_message)]
+
+    try:
+        response = claude_client.call_claude(
+            messages,
+            tool=claude_client.LOG_EXERCISE_ENTRY_TOOL,
+            system_prompt=claude_client.EXERCISE_SYSTEM_PROMPT,
+        )
+    except Exception:
+        flash("Couldn't reach the Claude API. Check your ANTHROPIC_API_KEY and try again.", "error")
+        return redirect(url_for("exercise_page"))
+
+    tool_input = claude_client.extract_tool_input(response)
+    updated_history = messages + [claude_client.response_as_message(response)]
+
+    if tool_input.get("needs_clarification"):
+        session["pending_exercise_conversation"] = updated_history
+        session["pending_exercise_question"] = tool_input.get(
+            "clarification_question", "Could you clarify that?"
+        )
+        return redirect(url_for("exercise_page"))
+
+    db = dbmod.get_db()
+    now = datetime.now()
+    parsed_time = tool_input.get("entry_time")
+    entry_time = parsed_time if parsed_time and TIME_PATTERN.match(parsed_time) else now.strftime("%H:%M")
+    db.execute(
+        """
+        INSERT INTO exercise_log
+            (entry_date, entry_time, activity, calories_burned, is_estimate, assumption_note)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            now.date().isoformat(),
+            entry_time,
+            tool_input["activity"],
+            tool_input["estimated_calories_burned"],
+            1 if tool_input["is_estimate"] else 0,
+            tool_input.get("assumption_note"),
+        ),
+    )
+    db.commit()
+
+    session.pop("pending_exercise_conversation", None)
+    session.pop("pending_exercise_question", None)
+    flash(f"Logged: {_describe_logged_exercise(tool_input)}", "success")
+    return redirect(url_for("exercise_page"))
+
+
 @app.route("/", methods=["GET"])
 def food_page():
     db = dbmod.get_db()

@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Exercise Log{% endblock %}
+{% block content %}
+  <h1>Exercise Log</h1>
+
+  {% if pending_question %}
+    <p class="pending-question" role="status">{{ pending_question }}</p>
+  {% endif %}
+
+  <form method="post" action="{{ url_for('exercise_log') }}">
+    <label for="message">
+      {% if pending_question %}Your answer{% else %}What did you do?{% endif %}
+    </label>
+    <input
+      type="text"
+      id="message"
+      name="message"
+      placeholder="e.g. ran 3 miles this morning"
+      required
+      autofocus
+    >
+    <button type="submit">Send</button>
+  </form>
+
+  <section aria-label="Today's activities">
+    <h2>Today <span class="total">{{ total_calories_burned }} cal burned</span></h2>
+    {% if entries %}
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">Time</th>
+            <th scope="col">Activity</th>
+            <th scope="col">Calories</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for entry in entries %}
+            <tr>
+              <td>{{ entry["entry_time"] }}</td>
+              <td>{{ entry["activity"] }}</td>
+              <td>{{ entry["calories_burned"] }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p>No exercise logged yet today.</p>
+    {% endif %}
+  </section>
+{% endblock %}

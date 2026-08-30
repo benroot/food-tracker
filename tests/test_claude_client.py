@@ -53,6 +53,25 @@ class CallClaudeTests(unittest.TestCase):
 
     @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"})
     @patch("claude_client.requests.post")
+    def test_explicit_tool_and_system_prompt_override_the_food_defaults(self, mock_post):
+        mock_post.return_value = Mock(json=lambda: make_response([]))
+
+        messages = [{"role": "user", "content": "ran 3 miles"}]
+        claude_client.call_claude(
+            messages,
+            tool=claude_client.LOG_EXERCISE_ENTRY_TOOL,
+            system_prompt=claude_client.EXERCISE_SYSTEM_PROMPT,
+        )
+
+        _, kwargs = mock_post.call_args
+        self.assertEqual(
+            kwargs["json"]["tool_choice"], {"type": "tool", "name": "log_exercise_entry"}
+        )
+        self.assertEqual(kwargs["json"]["system"], claude_client.EXERCISE_SYSTEM_PROMPT)
+        self.assertEqual(kwargs["json"]["tools"], [claude_client.LOG_EXERCISE_ENTRY_TOOL])
+
+    @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"})
+    @patch("claude_client.requests.post")
     def test_raises_on_http_error(self, mock_post):
         mock_response = Mock()
         mock_response.raise_for_status.side_effect = Exception("HTTP 401")

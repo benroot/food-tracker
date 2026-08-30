@@ -37,14 +37,27 @@ TOOL_INPUT_CLARIFY = {
     "clarification_question": "How many cookies?",
 }
 
+TOOL_INPUT_RUN = {
+    "activity": "Ran 3 miles",
+    "estimated_calories_burned": 350,
+    "is_estimate": True,
+    "assumption_note": "Assumed a moderate pace, ~150 lb runner",
+    "needs_clarification": False,
+}
 
-def fake_response(tool_input, tool_use_id="toolu_test"):
+TOOL_INPUT_EXERCISE_CLARIFY = {
+    "needs_clarification": True,
+    "clarification_question": "How long did you do yoga for?",
+}
+
+
+def fake_response(tool_input, tool_use_id="toolu_test", tool_name="log_food_entry"):
     return {
         "id": "msg_test",
         "type": "message",
         "role": "assistant",
         "content": [
-            {"type": "tool_use", "id": tool_use_id, "name": "log_food_entry", "input": tool_input}
+            {"type": "tool_use", "id": tool_use_id, "name": tool_name, "input": tool_input}
         ],
         "usage": {"input_tokens": 10, "output_tokens": 5},
     }
@@ -57,7 +70,8 @@ class FoodTrackerTestCase(unittest.TestCase):
         dbmod.init_db()
         with sqlite3.connect(dbmod.DB_PATH) as conn:
             conn.executescript(
-                "DELETE FROM log_entry_items; DELETE FROM log_entries; DELETE FROM weight_log;"
+                "DELETE FROM log_entry_items; DELETE FROM log_entries; "
+                "DELETE FROM weight_log; DELETE FROM exercise_log;"
             )
         self.client = appmod.app.test_client()
 
@@ -172,6 +186,88 @@ class FoodLogRouteTests(FoodTrackerTestCase):
         with sqlite3.connect(dbmod.DB_PATH) as conn:
             entry_time = conn.execute("SELECT entry_time FROM log_entries").fetchone()[0]
         self.assertRegex(entry_time, r"^([01]\d|2[0-3]):[0-5]\d$")
+
+
+class ExerciseLogRouteTests(FoodTrackerTestCase):
+    @patch("claude_client.call_claude")
+    def test_logging_a_clear_activity_writes_to_db_and_flashes_summary(self, mock_call_claude):
+        mock_call_claude.return_value = fake_response(TOOL_INPUT_RUN, tool_name="log_exercise_entry")
+
+        response = self.client.post(
+            "/exercise/log", data={"message": "ran 3 miles"}, follow_redirects=True
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Ran 3 miles", response.data)
+        self.assertIn(b"Assumed a moderate pace", response.data)
+        with sqlite3.connect(dbmod.DB_PATH) as conn:
+            row = conn.execute(
+                "SELECT activity, calories_burned, is_estimate FROM exercise_log"
+            ).fetchone()
+        self.assertEqual(row, ("Ran 3 miles", 350, 1))
+
+    @patch("claude_client.call_claude")
+    def test_ambiguous_activity_holds_for_clarification_without_writing_to_db(
+        self, mock_call_claude
+    ):
+        mock_call_claude.return_value = fake_response(
+            TOOL_INPUT_EXERCISE_CLARIFY, tool_name="log_exercise_entry"
+        )
+
+        response = self.client.post(
+            "/exercise/log", data={"message": "did some yoga"}, follow_redirects=True
+        )
+
+        self.assertIn(b"How long did you do yoga for?", response.data)
+        with sqlite3.connect(dbmod.DB_PATH) as conn:
+            count = conn.execute("SELECT COUNT(*) FROM exercise_log").fetchone()[0]
+        self.assertEqual(count, 0)
+
+    @patch("claude_client.call_claude")
+    def test_api_failure_flashes_error_and_does_not_crash(self, mock_call_claude):
+        mock_call_claude.side_effect = Exception("boom")
+
+        response = self.client.post(
+            "/exercise/log", data={"message": "ran 3 miles"}, follow_redirects=True
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Couldn", response.data)
+
+    @patch("claude_client.call_claude")
+    def test_explicit_entry_time_from_message_is_used(self, mock_call_claude):
+        mock_call_claude.return_value = fake_response(
+            {**TOOL_INPUT_RUN, "entry_time": "06:30"}, tool_name="log_exercise_entry"
+        )
+
+        self.client.post("/exercise/log", data={"message": "ran 3 miles at 6:30am"})
+
+        with sqlite3.connect(dbmod.DB_PATH) as conn:
+            entry_time = conn.execute("SELECT entry_time FROM exercise_log").fetchone()[0]
+        self.assertEqual(entry_time, "06:30")
+
+    @patch("claude_client.call_claude")
+    def test_missing_entry_time_falls_back_to_current_time(self, mock_call_claude):
+        mock_call_claude.return_value = fake_response(TOOL_INPUT_RUN, tool_name="log_exercise_entry")
+
+        self.client.post("/exercise/log", data={"message": "ran 3 miles"})
+
+        with sqlite3.connect(dbmod.DB_PATH) as conn:
+            entry_time = conn.execute("SELECT entry_time FROM exercise_log").fetchone()[0]
+        self.assertRegex(entry_time, r"^([01]\d|2[0-3]):[0-5]\d$")
+
+    def test_exercise_page_shows_todays_total(self):
+        with sqlite3.connect(dbmod.DB_PATH) as conn:
+            conn.execute(
+                "INSERT INTO exercise_log (entry_date, entry_time, activity, calories_burned) "
+                "VALUES (?, '07:00', 'Ran 3 miles', 350)",
+                (date.today().isoformat(),),
+            )
+
+        response = self.client.get("/exercise")
+
+        self.assertIn(b"350 cal burned", response.data)
+        self.assertIn(b"Ran 3 miles", response.data)
 
 
 class ManualFoodLogRouteTests(FoodTrackerTestCase):
