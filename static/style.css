@@ -206,15 +206,6 @@ td {
   margin-top: 0.15rem;
 }
 
-.estimate-tag {
-  font-size: 0.75rem;
-  color: #666;
-  border: 1px solid #ccc;
-  border-radius: 3px;
-  padding: 0 0.25rem;
-  margin-left: 0.25rem;
-}
-
 form {
   display: flex;
   flex-direction: column;

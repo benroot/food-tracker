@@ -107,7 +107,6 @@
               <td>
                 {{ entry["description"] }}
                 {% if entry["quantity"] %}({{ entry["quantity"] }}){% endif %}
-                {% if entry["is_estimate"] %}<span class="estimate-tag" title="{{ entry['assumption_note'] or 'Estimated' }}">est.</span>{% endif %}
               </td>
               <td>{{ entry["calories"] }}</td>
               <td class="row-actions">

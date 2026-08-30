@@ -109,6 +109,13 @@ def food_page():
     )
 
 
+def _describe_logged_item(item):
+    description = f'{item["food"]} ({item["estimated_calories"]} cal)'
+    if item.get("assumption_note"):
+        description += f' -- {item["assumption_note"]}'
+    return description
+
+
 @app.route("/food/log", methods=["POST"])
 def food_log():
     user_message = request.form.get("message", "").strip()
@@ -163,9 +170,7 @@ def food_log():
 
     session.pop("pending_conversation", None)
     session.pop("pending_question", None)
-    summary = ", ".join(
-        f'{item["food"]} ({item["estimated_calories"]} cal)' for item in tool_input["items"]
-    )
+    summary = ", ".join(_describe_logged_item(item) for item in tool_input["items"])
     flash(f'Logged to {tool_input["meal_type"]}: {summary}', "success")
     return redirect(url_for("food_page"))
 

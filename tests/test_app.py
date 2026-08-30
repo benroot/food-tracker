@@ -78,6 +78,32 @@ class FoodLogRouteTests(FoodTrackerTestCase):
         self.assertEqual(row[0], 95)
 
     @patch("claude_client.call_claude")
+    def test_flash_message_includes_assumption_note_when_present(self, mock_call_claude):
+        mock_call_claude.return_value = fake_response(TOOL_INPUT_APPLE)
+
+        response = self.client.post(
+            "/food/log", data={"message": "an apple"}, follow_redirects=True
+        )
+
+        self.assertIn(b"Assumed 1 medium apple", response.data)
+
+    @patch("claude_client.call_claude")
+    def test_flash_message_omits_note_separator_when_absent(self, mock_call_claude):
+        mock_call_claude.return_value = fake_response(
+            {
+                "items": [{"food": "Water", "estimated_calories": 0, "is_estimate": False}],
+                "meal_type": "Drink",
+                "needs_clarification": False,
+            }
+        )
+
+        response = self.client.post(
+            "/food/log", data={"message": "a glass of water"}, follow_redirects=True
+        )
+
+        self.assertIn(b"Logged to Drink: Water (0 cal)", response.data)
+
+    @patch("claude_client.call_claude")
     def test_ambiguous_entry_holds_for_clarification_without_writing_to_db(self, mock_call_claude):
         mock_call_claude.return_value = fake_response(TOOL_INPUT_CLARIFY)
 
