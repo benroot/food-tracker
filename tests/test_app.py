@@ -325,6 +325,78 @@ class ManualExerciseLogRouteTests(FoodTrackerTestCase):
         self.assertEqual(count, 0)
 
 
+class EditDeleteExerciseEntryRouteTests(FoodTrackerTestCase):
+    def _create_entry(self, activity="Pushups", calories=50):
+        self.client.post(
+            "/exercise/log-direct", data={"activity": activity, "calories": str(calories)}
+        )
+        with sqlite3.connect(dbmod.DB_PATH) as conn:
+            return conn.execute("SELECT id FROM exercise_log").fetchone()[0]
+
+    def test_edit_form_shows_current_values(self):
+        entry_id = self._create_entry(activity="Pushups", calories=50)
+
+        response = self.client.get(f"/exercise/entries/{entry_id}/edit")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b'value="Pushups"', response.data)
+        self.assertIn(b'value="50"', response.data)
+
+    def test_edit_updates_activity_and_calories(self):
+        entry_id = self._create_entry(activity="Pushups", calories=50)
+
+        response = self.client.post(
+            f"/exercise/entries/{entry_id}/edit",
+            data={"activity": "100 pushups", "calories": "80"},
+            follow_redirects=True,
+        )
+
+        self.assertIn(b"100 pushups", response.data)
+        with sqlite3.connect(dbmod.DB_PATH) as conn:
+            row = conn.execute(
+                "SELECT activity, calories_burned FROM exercise_log WHERE id = ?", (entry_id,)
+            ).fetchone()
+        self.assertEqual(row, ("100 pushups", 80))
+
+    def test_edit_rejects_invalid_calories_without_writing(self):
+        entry_id = self._create_entry(activity="Pushups", calories=50)
+
+        response = self.client.post(
+            f"/exercise/entries/{entry_id}/edit",
+            data={"activity": "Pushups", "calories": "not a number"},
+            follow_redirects=True,
+        )
+
+        self.assertIn(b"whole number", response.data)
+        with sqlite3.connect(dbmod.DB_PATH) as conn:
+            calories = conn.execute(
+                "SELECT calories_burned FROM exercise_log WHERE id = ?", (entry_id,)
+            ).fetchone()[0]
+        self.assertEqual(calories, 50)
+
+    def test_edit_nonexistent_entry_flashes_error_and_redirects(self):
+        response = self.client.get("/exercise/entries/9999/edit", follow_redirects=True)
+        self.assertIn(b"no longer exists", response.data)
+
+    def test_delete_removes_entry(self):
+        entry_id = self._create_entry()
+
+        response = self.client.post(
+            f"/exercise/entries/{entry_id}/delete", follow_redirects=True
+        )
+
+        self.assertIn(b"Deleted", response.data)
+        with sqlite3.connect(dbmod.DB_PATH) as conn:
+            count = conn.execute("SELECT COUNT(*) FROM exercise_log").fetchone()[0]
+        self.assertEqual(count, 0)
+
+    def test_delete_nonexistent_entry_flashes_error_and_redirects(self):
+        response = self.client.post(
+            "/exercise/entries/9999/delete", follow_redirects=True
+        )
+        self.assertIn(b"no longer exists", response.data)
+
+
 class ManualFoodLogRouteTests(FoodTrackerTestCase):
     def test_valid_entry_writes_to_db_as_non_estimate_without_calling_claude(self):
         with patch("claude_client.call_claude") as mock_call_claude:

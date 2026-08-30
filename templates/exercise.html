@@ -56,6 +56,7 @@
             <th scope="col">Time</th>
             <th scope="col">Activity</th>
             <th scope="col">Calories</th>
+            <th scope="col">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -64,6 +65,12 @@
               <td>{{ entry["entry_time"] }}</td>
               <td>{{ entry["activity"] }}</td>
               <td>{{ entry["calories_burned"] }}</td>
+              <td class="row-actions">
+                <a href="{{ url_for('exercise_entry_edit_form', entry_id=entry['id']) }}" aria-label="Edit {{ entry['activity'] }}">Edit</a>
+                <form method="post" action="{{ url_for('exercise_entry_delete', entry_id=entry['id']) }}" onsubmit="return confirm('Delete this entry?');">
+                  <button type="submit" aria-label="Delete {{ entry['activity'] }}">Delete</button>
+                </form>
+              </td>
             </tr>
           {% endfor %}
         </tbody>

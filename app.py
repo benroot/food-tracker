@@ -194,6 +194,70 @@ def exercise_log_direct():
     return redirect(url_for("exercise_page"))
 
 
+@app.route("/exercise/entries/<int:entry_id>/edit", methods=["GET"])
+def exercise_entry_edit_form(entry_id):
+    db = dbmod.get_db()
+    entry = db.execute(
+        "SELECT id, activity, calories_burned FROM exercise_log WHERE id = ?", (entry_id,)
+    ).fetchone()
+    if entry is None:
+        flash("That entry no longer exists.", "error")
+        return redirect(url_for("exercise_page"))
+    return render_template("edit_exercise_entry.html", entry=entry)
+
+
+@app.route("/exercise/entries/<int:entry_id>/edit", methods=["POST"])
+def exercise_entry_edit(entry_id):
+    db = dbmod.get_db()
+    existing = db.execute(
+        "SELECT id FROM exercise_log WHERE id = ?", (entry_id,)
+    ).fetchone()
+    if existing is None:
+        flash("That entry no longer exists.", "error")
+        return redirect(url_for("exercise_page"))
+
+    activity = request.form.get("activity", "").strip()
+    calories_raw = request.form.get("calories", "").strip()
+
+    if not activity:
+        flash("Enter an activity.", "error")
+        return redirect(url_for("exercise_entry_edit_form", entry_id=entry_id))
+
+    try:
+        calories = int(calories_raw)
+        if calories <= 0:
+            raise ValueError
+    except ValueError:
+        flash("Calories must be a whole number greater than 0.", "error")
+        return redirect(url_for("exercise_entry_edit_form", entry_id=entry_id))
+
+    db.execute(
+        "UPDATE exercise_log SET activity = ?, calories_burned = ? WHERE id = ?",
+        (activity, calories, entry_id),
+    )
+    db.commit()
+
+    flash(f"Updated: {activity} ({calories} cal)", "success")
+    return redirect(url_for("exercise_page"))
+
+
+@app.route("/exercise/entries/<int:entry_id>/delete", methods=["POST"])
+def exercise_entry_delete(entry_id):
+    db = dbmod.get_db()
+    row = db.execute(
+        "SELECT activity FROM exercise_log WHERE id = ?", (entry_id,)
+    ).fetchone()
+    if row is None:
+        flash("That entry no longer exists.", "error")
+        return redirect(url_for("exercise_page"))
+
+    db.execute("DELETE FROM exercise_log WHERE id = ?", (entry_id,))
+    db.commit()
+
+    flash(f'Deleted: {row["activity"]}', "success")
+    return redirect(url_for("exercise_page"))
+
+
 @app.route("/", methods=["GET"])
 def food_page():
     db = dbmod.get_db()
