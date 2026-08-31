@@ -75,31 +75,23 @@
   <section aria-label="Today's activities">
     <h2>Today <span class="total">{{ total_calories_burned }} cal burned</span></h2>
     {% if entries %}
-      <table>
-        <thead>
-          <tr>
-            <th scope="col">Time</th>
-            <th scope="col">Activity</th>
-            <th scope="col">Calories</th>
-            <th scope="col">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for entry in entries %}
-            <tr>
-              <td>{{ entry["entry_time"] }}</td>
-              <td>{{ entry["activity"] }}</td>
-              <td>{{ entry["calories_burned"] }}</td>
-              <td class="row-actions">
+      <ul class="log-list">
+        {% for entry in entries %}
+          <li class="log-entry">
+            <div class="log-entry-meta">
+              <span>{{ entry["entry_time"] }}</span>
+              <span class="log-entry-value">{{ entry["calories_burned"] }} cal</span>
+              <span class="row-actions">
                 <a href="{{ url_for('exercise_entry_edit_form', entry_id=entry['id']) }}" aria-label="Edit {{ entry['activity'] }}">Edit</a>
                 <form method="post" action="{{ url_for('exercise_entry_delete', entry_id=entry['id']) }}" onsubmit="return confirm('Delete this entry?');">
                   <button type="submit" aria-label="Delete {{ entry['activity'] }}">Delete</button>
                 </form>
-              </td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+              </span>
+            </div>
+            <div class="log-entry-description">{{ entry["activity"] }}</div>
+          </li>
+        {% endfor %}
+      </ul>
     {% else %}
       <p>No exercise logged yet today.</p>
     {% endif %}

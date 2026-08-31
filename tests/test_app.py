@@ -862,7 +862,7 @@ class WeightLogRouteTests(FoodTrackerTestCase):
         ]
         self.assertEqual(
             [d.strip() for d in dates_in_order],
-            ["<td>2026-08-22</td>", "<td>2026-08-21</td>", "<td>2026-08-20</td>"],
+            ["<span>2026-08-22</span>", "<span>2026-08-21</span>", "<span>2026-08-20</span>"],
         )
 
     def test_no_entries_shows_empty_state(self):

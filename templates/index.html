@@ -20,22 +20,16 @@
   <section aria-label="Weight history">
     <h2>History</h2>
     {% if entries %}
-      <table>
-        <thead>
-          <tr>
-            <th scope="col">Date</th>
-            <th scope="col">Weight</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for entry in entries %}
-            <tr>
-              <td>{{ entry["entry_date"] }}</td>
-              <td>{{ entry["weight_lbs"] }} lbs</td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+      <ul class="log-list">
+        {% for entry in entries %}
+          <li class="log-entry">
+            <div class="log-entry-meta">
+              <span>{{ entry["entry_date"] }}</span>
+              <span class="log-entry-value">{{ entry["weight_lbs"] }} lbs</span>
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
     {% else %}
       <p>No weight logged yet.</p>
     {% endif %}

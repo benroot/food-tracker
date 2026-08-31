@@ -97,36 +97,27 @@
       {% endif %}
     </h2>
     {% if entries %}
-      <table>
-        <thead>
-          <tr>
-            <th scope="col">Time</th>
-            <th scope="col">Meal</th>
-            <th scope="col">Item</th>
-            <th scope="col">Calories</th>
-            <th scope="col">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for entry in entries %}
-            <tr>
-              <td>{{ entry["entry_time"] }}</td>
-              <td>{{ entry["meal_type"] }}</td>
-              <td>
-                {{ entry["description"] }}
-                {% if entry["quantity"] %}({{ entry["quantity"] }}){% endif %}
-              </td>
-              <td>{{ entry["calories"] }}</td>
-              <td class="row-actions">
+      <ul class="log-list">
+        {% for entry in entries %}
+          <li class="log-entry">
+            <div class="log-entry-meta">
+              <span>{{ entry["entry_time"] }}</span>
+              <span>{{ entry["meal_type"] }}</span>
+              <span class="log-entry-value">{{ entry["calories"] }} cal</span>
+              <span class="row-actions">
                 <a href="{{ url_for('food_entry_edit_form', item_id=entry['item_id']) }}" aria-label="Edit {{ entry['description'] }}">Edit</a>
                 <form method="post" action="{{ url_for('food_entry_delete', item_id=entry['item_id']) }}" onsubmit="return confirm('Delete this entry?');">
                   <button type="submit" aria-label="Delete {{ entry['description'] }}">Delete</button>
                 </form>
-              </td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+              </span>
+            </div>
+            <div class="log-entry-description">
+              {{ entry["description"] }}
+              {% if entry["quantity"] %}({{ entry["quantity"] }}){% endif %}
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
     {% else %}
       <p>No food logged yet today.</p>
     {% endif %}
