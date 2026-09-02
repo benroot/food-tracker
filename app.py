@@ -1,6 +1,6 @@
 import re
 import secrets
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from flask import Flask, flash, redirect, render_template, request, session, url_for
 
@@ -14,6 +14,19 @@ MEAL_TYPES = ("Breakfast", "Lunch", "Dinner", "Snack", "Dessert", "Drink")
 REPEATABLE_MEAL_TYPES = ("Breakfast", "Lunch", "Dinner")
 RECENT_OPTIONS_LIMIT = 3
 TIME_PATTERN = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+
+
+def _resolve_entry_date(raw_offset):
+    """Log-target date from a form's entry_date_offset field: '0' for today,
+    '-1' for yesterday. Anything else (missing, malformed, out of range)
+    defaults to today rather than failing the whole submission."""
+    try:
+        offset = int(raw_offset)
+    except (TypeError, ValueError):
+        offset = 0
+    if offset not in (0, -1):
+        offset = 0
+    return date.today() + timedelta(days=offset)
 
 
 def _recent_meal_options(db, meal_type, limit=RECENT_OPTIONS_LIMIT):
@@ -69,6 +82,50 @@ def _recent_exercise_options(db, limit=RECENT_OPTIONS_LIMIT):
     ]
 
 
+def _food_day_summary(db, day, label):
+    entries = db.execute(
+        """
+        SELECT lei.id AS item_id, le.meal_type, le.entry_time,
+               lei.description, lei.quantity, lei.calories,
+               lei.is_estimate, lei.assumption_note
+        FROM log_entries le
+        JOIN log_entry_items lei ON lei.log_entry_id = le.id
+        WHERE le.entry_date = ?
+        ORDER BY le.entry_time DESC, le.id DESC, lei.id ASC
+        """,
+        (day.isoformat(),),
+    ).fetchall()
+    total_calories = sum(entry["calories"] for entry in entries)
+    calories_burned = db.execute(
+        "SELECT COALESCE(SUM(calories_burned), 0) FROM exercise_log WHERE entry_date = ?",
+        (day.isoformat(),),
+    ).fetchone()[0]
+    return {
+        "label": label,
+        "entries": entries,
+        "total_calories": total_calories,
+        "calories_burned": calories_burned,
+        "net_calories": total_calories - calories_burned,
+    }
+
+
+def _exercise_day_summary(db, day, label):
+    entries = db.execute(
+        """
+        SELECT id, entry_time, activity, calories_burned, is_estimate, assumption_note
+        FROM exercise_log
+        WHERE entry_date = ?
+        ORDER BY entry_time DESC, id DESC
+        """,
+        (day.isoformat(),),
+    ).fetchall()
+    return {
+        "label": label,
+        "entries": entries,
+        "total_calories_burned": sum(entry["calories_burned"] for entry in entries),
+    }
+
+
 app = Flask(__name__)
 app.secret_key = secrets.token_hex(32)
 
@@ -105,22 +162,13 @@ def log_weight():
 @app.route("/exercise", methods=["GET"])
 def exercise_page():
     db = dbmod.get_db()
-    today = date.today().isoformat()
-    entries = db.execute(
-        """
-        SELECT id, entry_time, activity, calories_burned, is_estimate, assumption_note
-        FROM exercise_log
-        WHERE entry_date = ?
-        ORDER BY entry_time DESC, id DESC
-        """,
-        (today,),
-    ).fetchall()
-    total_calories_burned = sum(entry["calories_burned"] for entry in entries)
+    today_summary = _exercise_day_summary(db, date.today(), "Today")
+    yesterday_summary = _exercise_day_summary(db, date.today() - timedelta(days=1), "Yesterday")
     repeat_options = _recent_exercise_options(db)
     return render_template(
         "exercise.html",
-        entries=entries,
-        total_calories_burned=total_calories_burned,
+        today=today_summary,
+        yesterday=yesterday_summary,
         pending_question=session.get("pending_exercise_question"),
         repeat_options=repeat_options,
     )
@@ -164,6 +212,7 @@ def exercise_log():
 
     db = dbmod.get_db()
     now = datetime.now()
+    entry_date = _resolve_entry_date(request.form.get("entry_date_offset"))
     parsed_time = tool_input.get("entry_time")
     entry_time = parsed_time if parsed_time and TIME_PATTERN.match(parsed_time) else now.strftime("%H:%M")
     db.execute(
@@ -173,7 +222,7 @@ def exercise_log():
         VALUES (?, ?, ?, ?, ?, ?)
         """,
         (
-            now.date().isoformat(),
+            entry_date.isoformat(),
             entry_time,
             tool_input["activity"],
             tool_input["estimated_calories_burned"],
@@ -208,13 +257,14 @@ def exercise_log_direct():
 
     db = dbmod.get_db()
     now = datetime.now()
+    entry_date = _resolve_entry_date(request.form.get("entry_date_offset"))
     db.execute(
         """
         INSERT INTO exercise_log
             (entry_date, entry_time, activity, calories_burned, is_estimate)
         VALUES (?, ?, ?, ?, 0)
         """,
-        (now.date().isoformat(), now.strftime("%H:%M"), activity, calories),
+        (entry_date.isoformat(), now.strftime("%H:%M"), activity, calories),
     )
     db.commit()
 
@@ -307,6 +357,7 @@ def exercise_repeat():
         return redirect(url_for("exercise_page"))
 
     now = datetime.now()
+    entry_date = _resolve_entry_date(request.form.get("entry_date_offset"))
     requested_time = request.form.get("entry_time", "").strip()
     entry_time = requested_time if requested_time and TIME_PATTERN.match(requested_time) else now.strftime("%H:%M")
     db.execute(
@@ -316,7 +367,7 @@ def exercise_repeat():
         VALUES (?, ?, ?, ?, ?, ?)
         """,
         (
-            now.date().isoformat(),
+            entry_date.isoformat(),
             entry_time,
             source["activity"],
             source["calories_burned"],
@@ -333,34 +384,16 @@ def exercise_repeat():
 @app.route("/", methods=["GET"])
 def food_page():
     db = dbmod.get_db()
-    today = date.today().isoformat()
-    entries = db.execute(
-        """
-        SELECT lei.id AS item_id, le.meal_type, le.entry_time,
-               lei.description, lei.quantity, lei.calories,
-               lei.is_estimate, lei.assumption_note
-        FROM log_entries le
-        JOIN log_entry_items lei ON lei.log_entry_id = le.id
-        WHERE le.entry_date = ?
-        ORDER BY le.entry_time DESC, le.id DESC, lei.id ASC
-        """,
-        (today,),
-    ).fetchall()
-    total_calories = sum(entry["calories"] for entry in entries)
-    calories_burned = db.execute(
-        "SELECT COALESCE(SUM(calories_burned), 0) FROM exercise_log WHERE entry_date = ?",
-        (today,),
-    ).fetchone()[0]
+    today_summary = _food_day_summary(db, date.today(), "Today")
+    yesterday_summary = _food_day_summary(db, date.today() - timedelta(days=1), "Yesterday")
     repeat_options = {
         meal_type: _recent_meal_options(db, meal_type)
         for meal_type in REPEATABLE_MEAL_TYPES
     }
     return render_template(
         "food.html",
-        entries=entries,
-        total_calories=total_calories,
-        calories_burned=calories_burned,
-        net_calories=total_calories - calories_burned,
+        today=today_summary,
+        yesterday=yesterday_summary,
         pending_question=session.get("pending_question"),
         meal_types=MEAL_TYPES,
         repeatable_meal_types=REPEATABLE_MEAL_TYPES,
@@ -403,11 +436,12 @@ def food_log():
 
     db = dbmod.get_db()
     now = datetime.now()
+    entry_date = _resolve_entry_date(request.form.get("entry_date_offset"))
     parsed_time = tool_input.get("entry_time")
     entry_time = parsed_time if parsed_time and TIME_PATTERN.match(parsed_time) else now.strftime("%H:%M")
     cursor = db.execute(
         "INSERT INTO log_entries (entry_date, entry_time, meal_type) VALUES (?, ?, ?)",
-        (now.date().isoformat(), entry_time, tool_input["meal_type"]),
+        (entry_date.isoformat(), entry_time, tool_input["meal_type"]),
     )
     log_entry_id = cursor.lastrowid
     for item in tool_input["items"]:
@@ -455,9 +489,10 @@ def food_log_direct():
 
     db = dbmod.get_db()
     now = datetime.now()
+    entry_date = _resolve_entry_date(request.form.get("entry_date_offset"))
     cursor = db.execute(
         "INSERT INTO log_entries (entry_date, entry_time, meal_type) VALUES (?, ?, ?)",
-        (now.date().isoformat(), now.strftime("%H:%M"), meal_type),
+        (entry_date.isoformat(), now.strftime("%H:%M"), meal_type),
     )
     db.execute(
         """
@@ -497,11 +532,12 @@ def food_repeat():
         return redirect(url_for("food_page"))
 
     now = datetime.now()
+    entry_date = _resolve_entry_date(request.form.get("entry_date_offset"))
     requested_time = request.form.get("entry_time", "").strip()
     entry_time = requested_time if requested_time and TIME_PATTERN.match(requested_time) else now.strftime("%H:%M")
     cursor = db.execute(
         "INSERT INTO log_entries (entry_date, entry_time, meal_type) VALUES (?, ?, ?)",
-        (now.date().isoformat(), entry_time, source_entry["meal_type"]),
+        (entry_date.isoformat(), entry_time, source_entry["meal_type"]),
     )
     new_entry_id = cursor.lastrowid
     for item in source_items:

@@ -31,6 +31,11 @@
           required
           autofocus
         >
+        <fieldset class="date-select">
+          <legend>Log for</legend>
+          <label><input type="radio" name="entry_date_offset" value="0" checked> Today</label>
+          <label><input type="radio" name="entry_date_offset" value="-1"> Yesterday</label>
+        </fieldset>
         <button type="submit">Send</button>
       </form>
     </section>
@@ -41,6 +46,12 @@
         <form method="post" action="{{ url_for('exercise_repeat') }}">
           <label for="repeat_time">Log at time (optional)</label>
           <input type="time" id="repeat_time" name="entry_time">
+
+          <fieldset class="date-select">
+            <legend>Log for</legend>
+            <label><input type="radio" name="entry_date_offset" value="0" checked> Today</label>
+            <label><input type="radio" name="entry_date_offset" value="-1"> Yesterday</label>
+          </fieldset>
 
           <ul class="repeat-options">
             {% for option in repeat_options %}
@@ -67,33 +78,74 @@
         <label for="calories">Calories</label>
         <input type="number" id="calories" name="calories" min="1" step="1" required>
 
+        <fieldset class="date-select">
+          <legend>Log for</legend>
+          <label><input type="radio" name="entry_date_offset" value="0" checked> Today</label>
+          <label><input type="radio" name="entry_date_offset" value="-1"> Yesterday</label>
+        </fieldset>
+
         <button type="submit">Log directly</button>
       </form>
     </section>
   </div>
 
-  <section aria-label="Today's activities">
-    <h2>Today <span class="total">{{ total_calories_burned }} cal burned</span></h2>
-    {% if entries %}
-      <ul class="log-list">
-        {% for entry in entries %}
-          <li class="log-entry">
-            <div class="log-entry-meta">
-              <span>{{ entry["entry_time"] }}</span>
-              <span class="log-entry-value">{{ entry["calories_burned"] }} cal</span>
-              <span class="row-actions">
-                <a href="{{ url_for('exercise_entry_edit_form', entry_id=entry['id']) }}" aria-label="Edit {{ entry['activity'] }}">Edit</a>
-                <form method="post" action="{{ url_for('exercise_entry_delete', entry_id=entry['id']) }}" onsubmit="return confirm('Delete this entry?');">
-                  <button type="submit" aria-label="Delete {{ entry['activity'] }}">Delete</button>
-                </form>
-              </span>
-            </div>
-            <div class="log-entry-description">{{ entry["activity"] }}</div>
-          </li>
-        {% endfor %}
-      </ul>
-    {% else %}
-      <p>No exercise logged yet today.</p>
-    {% endif %}
-  </section>
+  <div class="tabs day-view">
+    <input type="radio" name="view_day" id="view-today" class="tab-input" checked>
+    <input type="radio" name="view_day" id="view-yesterday" class="tab-input">
+
+    <div class="tab-list">
+      <label for="view-today">Today</label>
+      <label for="view-yesterday">Yesterday</label>
+    </div>
+
+    <section class="tab-panel" id="day-panel-today" aria-label="Today's activities">
+      <h2>{{ today.label }} <span class="total">{{ today.total_calories_burned }} cal burned</span></h2>
+      {% if today.entries %}
+        <ul class="log-list">
+          {% for entry in today.entries %}
+            <li class="log-entry">
+              <div class="log-entry-meta">
+                <span>{{ entry["entry_time"] }}</span>
+                <span class="log-entry-value">{{ entry["calories_burned"] }} cal</span>
+                <span class="row-actions">
+                  <a href="{{ url_for('exercise_entry_edit_form', entry_id=entry['id']) }}" aria-label="Edit {{ entry['activity'] }}">Edit</a>
+                  <form method="post" action="{{ url_for('exercise_entry_delete', entry_id=entry['id']) }}" onsubmit="return confirm('Delete this entry?');">
+                    <button type="submit" aria-label="Delete {{ entry['activity'] }}">Delete</button>
+                  </form>
+                </span>
+              </div>
+              <div class="log-entry-description">{{ entry["activity"] }}</div>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p>No exercise logged yet today.</p>
+      {% endif %}
+    </section>
+
+    <section class="tab-panel" id="day-panel-yesterday" aria-label="Yesterday's activities">
+      <h2>{{ yesterday.label }} <span class="total">{{ yesterday.total_calories_burned }} cal burned</span></h2>
+      {% if yesterday.entries %}
+        <ul class="log-list">
+          {% for entry in yesterday.entries %}
+            <li class="log-entry">
+              <div class="log-entry-meta">
+                <span>{{ entry["entry_time"] }}</span>
+                <span class="log-entry-value">{{ entry["calories_burned"] }} cal</span>
+                <span class="row-actions">
+                  <a href="{{ url_for('exercise_entry_edit_form', entry_id=entry['id']) }}" aria-label="Edit {{ entry['activity'] }}">Edit</a>
+                  <form method="post" action="{{ url_for('exercise_entry_delete', entry_id=entry['id']) }}" onsubmit="return confirm('Delete this entry?');">
+                    <button type="submit" aria-label="Delete {{ entry['activity'] }}">Delete</button>
+                  </form>
+                </span>
+              </div>
+              <div class="log-entry-description">{{ entry["activity"] }}</div>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p>No exercise logged yet yesterday.</p>
+      {% endif %}
+    </section>
+  </div>
 {% endblock %}

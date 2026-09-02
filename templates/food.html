@@ -31,6 +31,11 @@
           required
           autofocus
         >
+        <fieldset class="date-select">
+          <legend>Log for</legend>
+          <label><input type="radio" name="entry_date_offset" value="0" checked> Today</label>
+          <label><input type="radio" name="entry_date_offset" value="-1"> Yesterday</label>
+        </fieldset>
         <button type="submit">Send</button>
       </form>
     </section>
@@ -41,6 +46,12 @@
         <form method="post" action="{{ url_for('food_repeat') }}">
           <label for="repeat_time">Log at time (optional)</label>
           <input type="time" id="repeat_time" name="entry_time">
+
+          <fieldset class="date-select">
+            <legend>Log for</legend>
+            <label><input type="radio" name="entry_date_offset" value="0" checked> Today</label>
+            <label><input type="radio" name="entry_date_offset" value="-1"> Yesterday</label>
+          </fieldset>
 
           {% for meal_type in repeatable_meal_types %}
             {% if repeat_options[meal_type] %}
@@ -81,45 +92,98 @@
           {% endfor %}
         </select>
 
+        <fieldset class="date-select">
+          <legend>Log for</legend>
+          <label><input type="radio" name="entry_date_offset" value="0" checked> Today</label>
+          <label><input type="radio" name="entry_date_offset" value="-1"> Yesterday</label>
+        </fieldset>
+
         <button type="submit">Log directly</button>
       </form>
     </section>
   </div>
 
-  <section aria-label="Today's entries">
-    <h2>
-      Today
-      {% if calories_burned %}
-        <span class="total">{{ net_calories }} cal net</span>
-        <span class="calorie-breakdown">{{ total_calories }} consumed &minus; {{ calories_burned }} burned</span>
+  <div class="tabs day-view">
+    <input type="radio" name="view_day" id="view-today" class="tab-input" checked>
+    <input type="radio" name="view_day" id="view-yesterday" class="tab-input">
+
+    <div class="tab-list">
+      <label for="view-today">Today</label>
+      <label for="view-yesterday">Yesterday</label>
+    </div>
+
+    <section class="tab-panel" id="day-panel-today" aria-label="Today's entries">
+      <h2>
+        {{ today.label }}
+        {% if today.calories_burned %}
+          <span class="total">{{ today.net_calories }} cal net</span>
+          <span class="calorie-breakdown">{{ today.total_calories }} consumed &minus; {{ today.calories_burned }} burned</span>
+        {% else %}
+          <span class="total">{{ today.total_calories }} cal</span>
+        {% endif %}
+      </h2>
+      {% if today.entries %}
+        <ul class="log-list">
+          {% for entry in today.entries %}
+            <li class="log-entry">
+              <div class="log-entry-meta">
+                <span>{{ entry["entry_time"] }}</span>
+                <span>{{ entry["meal_type"] }}</span>
+                <span class="log-entry-value">{{ entry["calories"] }} cal</span>
+                <span class="row-actions">
+                  <a href="{{ url_for('food_entry_edit_form', item_id=entry['item_id']) }}" aria-label="Edit {{ entry['description'] }}">Edit</a>
+                  <form method="post" action="{{ url_for('food_entry_delete', item_id=entry['item_id']) }}" onsubmit="return confirm('Delete this entry?');">
+                    <button type="submit" aria-label="Delete {{ entry['description'] }}">Delete</button>
+                  </form>
+                </span>
+              </div>
+              <div class="log-entry-description">
+                {{ entry["description"] }}
+                {% if entry["quantity"] %}({{ entry["quantity"] }}){% endif %}
+              </div>
+            </li>
+          {% endfor %}
+        </ul>
       {% else %}
-        <span class="total">{{ total_calories }} cal</span>
+        <p>No food logged yet today.</p>
       {% endif %}
-    </h2>
-    {% if entries %}
-      <ul class="log-list">
-        {% for entry in entries %}
-          <li class="log-entry">
-            <div class="log-entry-meta">
-              <span>{{ entry["entry_time"] }}</span>
-              <span>{{ entry["meal_type"] }}</span>
-              <span class="log-entry-value">{{ entry["calories"] }} cal</span>
-              <span class="row-actions">
-                <a href="{{ url_for('food_entry_edit_form', item_id=entry['item_id']) }}" aria-label="Edit {{ entry['description'] }}">Edit</a>
-                <form method="post" action="{{ url_for('food_entry_delete', item_id=entry['item_id']) }}" onsubmit="return confirm('Delete this entry?');">
-                  <button type="submit" aria-label="Delete {{ entry['description'] }}">Delete</button>
-                </form>
-              </span>
-            </div>
-            <div class="log-entry-description">
-              {{ entry["description"] }}
-              {% if entry["quantity"] %}({{ entry["quantity"] }}){% endif %}
-            </div>
-          </li>
-        {% endfor %}
-      </ul>
-    {% else %}
-      <p>No food logged yet today.</p>
-    {% endif %}
-  </section>
+    </section>
+
+    <section class="tab-panel" id="day-panel-yesterday" aria-label="Yesterday's entries">
+      <h2>
+        {{ yesterday.label }}
+        {% if yesterday.calories_burned %}
+          <span class="total">{{ yesterday.net_calories }} cal net</span>
+          <span class="calorie-breakdown">{{ yesterday.total_calories }} consumed &minus; {{ yesterday.calories_burned }} burned</span>
+        {% else %}
+          <span class="total">{{ yesterday.total_calories }} cal</span>
+        {% endif %}
+      </h2>
+      {% if yesterday.entries %}
+        <ul class="log-list">
+          {% for entry in yesterday.entries %}
+            <li class="log-entry">
+              <div class="log-entry-meta">
+                <span>{{ entry["entry_time"] }}</span>
+                <span>{{ entry["meal_type"] }}</span>
+                <span class="log-entry-value">{{ entry["calories"] }} cal</span>
+                <span class="row-actions">
+                  <a href="{{ url_for('food_entry_edit_form', item_id=entry['item_id']) }}" aria-label="Edit {{ entry['description'] }}">Edit</a>
+                  <form method="post" action="{{ url_for('food_entry_delete', item_id=entry['item_id']) }}" onsubmit="return confirm('Delete this entry?');">
+                    <button type="submit" aria-label="Delete {{ entry['description'] }}">Delete</button>
+                  </form>
+                </span>
+              </div>
+              <div class="log-entry-description">
+                {{ entry["description"] }}
+                {% if entry["quantity"] %}({{ entry["quantity"] }}){% endif %}
+              </div>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p>No food logged yet yesterday.</p>
+      {% endif %}
+    </section>
+  </div>
 {% endblock %}

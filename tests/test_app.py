@@ -2,7 +2,7 @@ import os
 import sqlite3
 import tempfile
 import unittest
-from datetime import date
+from datetime import date, timedelta
 from unittest.mock import patch
 
 _db_fd, _db_path = tempfile.mkstemp(suffix=".db")
@@ -74,6 +74,172 @@ class FoodTrackerTestCase(unittest.TestCase):
                 "DELETE FROM weight_log; DELETE FROM exercise_log;"
             )
         self.client = appmod.app.test_client()
+
+
+class ResolveEntryDateTests(unittest.TestCase):
+    def test_today_offset(self):
+        self.assertEqual(appmod._resolve_entry_date("0"), date.today())
+
+    def test_yesterday_offset(self):
+        self.assertEqual(appmod._resolve_entry_date("-1"), date.today() - timedelta(days=1))
+
+    def test_missing_or_malformed_defaults_to_today(self):
+        self.assertEqual(appmod._resolve_entry_date(None), date.today())
+        self.assertEqual(appmod._resolve_entry_date(""), date.today())
+        self.assertEqual(appmod._resolve_entry_date("abc"), date.today())
+
+    def test_out_of_range_offset_defaults_to_today(self):
+        self.assertEqual(appmod._resolve_entry_date("1"), date.today())
+        self.assertEqual(appmod._resolve_entry_date("-2"), date.today())
+
+
+class DateSelectorRouteTests(FoodTrackerTestCase):
+    def test_food_log_direct_can_target_yesterday(self):
+        self.client.post(
+            "/food/log-direct",
+            data={
+                "food": "Leftover pizza",
+                "calories": "400",
+                "meal_type": "Dinner",
+                "entry_date_offset": "-1",
+            },
+        )
+
+        # entry_date lives on log_entries, not log_entry_items -- join to get it.
+        with sqlite3.connect(dbmod.DB_PATH) as conn:
+            entry_date = conn.execute(
+                """
+                SELECT le.entry_date FROM log_entries le
+                JOIN log_entry_items lei ON lei.log_entry_id = le.id
+                WHERE lei.description = 'Leftover pizza'
+                """
+            ).fetchone()[0]
+        self.assertEqual(entry_date, (date.today() - timedelta(days=1)).isoformat())
+
+    def test_food_log_direct_defaults_to_today_when_offset_missing(self):
+        self.client.post(
+            "/food/log-direct",
+            data={"food": "Cereal", "calories": "200", "meal_type": "Breakfast"},
+        )
+
+        with sqlite3.connect(dbmod.DB_PATH) as conn:
+            entry_date = conn.execute(
+                """
+                SELECT le.entry_date FROM log_entries le
+                JOIN log_entry_items lei ON lei.log_entry_id = le.id
+                WHERE lei.description = 'Cereal'
+                """
+            ).fetchone()[0]
+        self.assertEqual(entry_date, date.today().isoformat())
+
+    @patch("claude_client.call_claude")
+    def test_food_log_chat_can_target_yesterday(self, mock_call_claude):
+        mock_call_claude.return_value = fake_response(TOOL_INPUT_APPLE)
+
+        self.client.post(
+            "/food/log", data={"message": "an apple", "entry_date_offset": "-1"}
+        )
+
+        with sqlite3.connect(dbmod.DB_PATH) as conn:
+            entry_date = conn.execute("SELECT entry_date FROM log_entries").fetchone()[0]
+        self.assertEqual(entry_date, (date.today() - timedelta(days=1)).isoformat())
+
+    def test_food_repeat_can_target_yesterday(self):
+        with sqlite3.connect(dbmod.DB_PATH) as conn:
+            cursor = conn.execute(
+                "INSERT INTO log_entries (entry_date, entry_time, meal_type) "
+                "VALUES ('2026-08-20', '08:00', 'Breakfast')"
+            )
+            entry_id = cursor.lastrowid
+            conn.execute(
+                "INSERT INTO log_entry_items (log_entry_id, description, calories, is_estimate) "
+                "VALUES (?, 'Oatmeal', 200, 0)",
+                (entry_id,),
+            )
+
+        self.client.post(
+            "/food/repeat", data={"entry_id": str(entry_id), "entry_date_offset": "-1"}
+        )
+
+        with sqlite3.connect(dbmod.DB_PATH) as conn:
+            entry_date = conn.execute(
+                "SELECT entry_date FROM log_entries WHERE entry_date != '2026-08-20'"
+            ).fetchone()[0]
+        self.assertEqual(entry_date, (date.today() - timedelta(days=1)).isoformat())
+
+    def test_exercise_log_direct_can_target_yesterday(self):
+        self.client.post(
+            "/exercise/log-direct",
+            data={"activity": "Pushups", "calories": "50", "entry_date_offset": "-1"},
+        )
+
+        with sqlite3.connect(dbmod.DB_PATH) as conn:
+            entry_date = conn.execute("SELECT entry_date FROM exercise_log").fetchone()[0]
+        self.assertEqual(entry_date, (date.today() - timedelta(days=1)).isoformat())
+
+    @patch("claude_client.call_claude")
+    def test_exercise_log_chat_can_target_yesterday(self, mock_call_claude):
+        mock_call_claude.return_value = fake_response(TOOL_INPUT_RUN, tool_name="log_exercise_entry")
+
+        self.client.post(
+            "/exercise/log", data={"message": "ran 3 miles", "entry_date_offset": "-1"}
+        )
+
+        with sqlite3.connect(dbmod.DB_PATH) as conn:
+            entry_date = conn.execute("SELECT entry_date FROM exercise_log").fetchone()[0]
+        self.assertEqual(entry_date, (date.today() - timedelta(days=1)).isoformat())
+
+    def test_exercise_repeat_can_target_yesterday(self):
+        with sqlite3.connect(dbmod.DB_PATH) as conn:
+            cursor = conn.execute(
+                "INSERT INTO exercise_log (entry_date, entry_time, activity, calories_burned) "
+                "VALUES ('2026-08-20', '08:00', 'Yoga', 120)"
+            )
+            entry_id = cursor.lastrowid
+
+        self.client.post(
+            "/exercise/repeat", data={"entry_id": str(entry_id), "entry_date_offset": "-1"}
+        )
+
+        with sqlite3.connect(dbmod.DB_PATH) as conn:
+            entry_date = conn.execute(
+                "SELECT entry_date FROM exercise_log WHERE entry_date != '2026-08-20'"
+            ).fetchone()[0]
+        self.assertEqual(entry_date, (date.today() - timedelta(days=1)).isoformat())
+
+    def test_food_page_shows_both_today_and_yesterday_entries(self):
+        self.client.post(
+            "/food/log-direct",
+            data={"food": "Bagel", "calories": "300", "meal_type": "Breakfast"},
+        )
+        self.client.post(
+            "/food/log-direct",
+            data={
+                "food": "Leftover tacos",
+                "calories": "500",
+                "meal_type": "Dinner",
+                "entry_date_offset": "-1",
+            },
+        )
+
+        response = self.client.get("/")
+
+        self.assertIn(b"Bagel", response.data)
+        self.assertIn(b"Leftover tacos", response.data)
+
+    def test_exercise_page_shows_both_today_and_yesterday_entries(self):
+        self.client.post(
+            "/exercise/log-direct", data={"activity": "Pushups", "calories": "50"}
+        )
+        self.client.post(
+            "/exercise/log-direct",
+            data={"activity": "Cycled to work", "calories": "200", "entry_date_offset": "-1"},
+        )
+
+        response = self.client.get("/exercise")
+
+        self.assertIn(b"Pushups", response.data)
+        self.assertIn(b"Cycled to work", response.data)
 
 
 class FoodLogRouteTests(FoodTrackerTestCase):
