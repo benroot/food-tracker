@@ -286,7 +286,11 @@ Candidates, not commitments: proactive "save as bundle?" prompting after a repea
 Candidates, not commitments: a considered color palette and typographic scale beyond the current functional grayscale/system-font baseline, refined spacing and visual hierarchy, small icons for meal types instead of plain text, and light visual branding (the favicon/apple-touch-icon set already in place is a first, minimal step in that direction). Any motion or transitions introduced here must still respect `prefers-reduced-motion` per the existing accessibility requirement, and any new font/icon source still needs explicit sign-off first per the no-silent-additions rule. Deliberately kept separate from Phase 7: that phase is about features and data completeness, this one is purely about how the app looks and feels — the app should already be fully functional and accessible before spending effort here.
 *Usable for*: nothing new becomes usable that wasn't already — this phase makes daily use of the already-complete app more pleasant, not more capable.
 
-Each phase boundary is a reasonable point to stop, use the app for real, and decide whether the next phase is worth building yet — not a forced march to Phase 8.
+### Phase 9 — Historical dashboard / trends (not yet scoped)
+A new page summarizing trends over time rather than only ever showing "today": weight over weeks/months, daily calorie counts, daily exercise calories burned, and net calories per day, across a selectable date range. This is a placeholder, not a design — chart vs. table, which date ranges, and how it relates to (or replaces) Phase 7's brief "history/trend views" mention all still need to be worked out in a dedicated discussion before implementation starts. Noted here now specifically so it isn't lost if development pauses in between.
+*Usable for*: nothing yet — this entry exists to hold the idea's place in the roadmap, not to describe a built feature.
+
+Each phase boundary is a reasonable point to stop, use the app for real, and decide whether the next phase is worth building yet — not a forced march to Phase 9.
 
 ---
 
