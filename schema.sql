@@ -15,12 +15,13 @@ CREATE TABLE IF NOT EXISTS food_items (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- One row per logged meal event
+-- One row per logged meal event. No meal_type (Breakfast/Lunch/... labeling
+-- was dropped -- it added friction without real use; see git history for
+-- the removal and Development Phases for the design note).
 CREATE TABLE IF NOT EXISTS log_entries (
     id INTEGER PRIMARY KEY,
     entry_date TEXT NOT NULL,
     entry_time TEXT NOT NULL,
-    meal_type TEXT NOT NULL CHECK (meal_type IN ('Breakfast','Lunch','Dinner','Snack','Dessert','Drink')),
     source_bundle_id INTEGER REFERENCES meal_bundles(id),
     notes TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))

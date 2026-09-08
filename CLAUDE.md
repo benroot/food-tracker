@@ -71,11 +71,10 @@ Forced tool call pattern — the backend never parses free-text JSON from a prom
           "required": ["food", "estimated_calories", "is_estimate"]
         }
       },
-      "meal_type": { "type": "string", "enum": ["Breakfast", "Lunch", "Dinner", "Snack", "Dessert", "Drink"] },
       "needs_clarification": { "type": "boolean" },
       "clarification_question": { "type": "string" }
     },
-    "required": ["items", "meal_type", "needs_clarification"]
+    "required": ["items", "needs_clarification"]
   }
 }
 ```
@@ -116,12 +115,14 @@ CREATE TABLE meal_bundle_items (
     calories INTEGER NOT NULL
 );
 
--- One row per logged meal event
+-- One row per logged meal event. No meal_type (Breakfast/Lunch/... labeling
+-- was dropped -- it added friction without real use; the ALTER TABLE DROP
+-- COLUMN migration that removed it in production runs automatically from
+-- db.py's init_db() on first boot after deploy, see Local Development.
 CREATE TABLE log_entries (
     id INTEGER PRIMARY KEY,
     entry_date TEXT NOT NULL,
     entry_time TEXT NOT NULL,
-    meal_type TEXT NOT NULL CHECK (meal_type IN ('Breakfast','Lunch','Dinner','Snack','Dessert','Drink')),
     source_bundle_id INTEGER REFERENCES meal_bundles(id),
     notes TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -188,6 +189,7 @@ Flow:
 - SQLite file for local data — no external services required to develop or test.
 - Local dev server + browser at localhost; manually test by sending a food message through the chat UI and confirming the row lands correctly in the SQLite file (inspectable with a tool like DB Browser for SQLite).
 - Automated tests never call the live Claude API — see Testing Strategy below.
+- **Schema migrations are self-applying, not a manual deploy step.** `db.py`'s `init_db()` already runs unconditionally on every app boot (this is what creates `food_log.db` on a fresh install — see the Passenger import behavior this was built around). It also runs a small `_migrate_schema()` check for any schema changes made after initial deploy that `CREATE TABLE IF NOT EXISTS` can't retroactively apply to an existing database (e.g. dropping the `meal_type` column). Each check is a no-op once already applied, so it's safe to leave permanently and safe across multiple Passenger workers booting concurrently. This means a schema change ships the same way every other change does: `git pull` → Restart, nothing extra to remember.
 
 ---
 
@@ -254,7 +256,7 @@ A Flask app with `weight_log` table and a single input using **simple, non-AI pa
 *Usable for*: confirming Flask + SQLite + the dev server actually work together, with the simplest possible real feature — before spending effort on food parsing's added complexity, and before introducing the Claude API call at all (that arrives in Phase 2). Also a good first checkpoint to confirm the Python 3.8 environment itself is working end to end, before any API-calling code is added.
 
 ### Phase 2 — Natural language logging for new (one-off) meals
-Introduce the Claude API call for the first time (via direct `requests` calls, per the Architecture decision above): a forced tool call (`log_food_entry`) parses something like "add a banana to breakfast" or "had two eggs and toast around 8am," inferring food, estimated calories, meal type, date (defaulting to today), and time (defaulting to now). Writes to the normalized SQLite schema. A page shows today's entries and running total. No bundle matching yet — every message is treated as a one-off meal.
+Introduce the Claude API call for the first time (via direct `requests` calls, per the Architecture decision above): a forced tool call (`log_food_entry`) parses something like "add a banana to breakfast" or "had two eggs and toast around 8am," inferring food, estimated calories, date (defaulting to today), and time (defaulting to now). Writes to the normalized SQLite schema. A page shows today's entries and running total. No bundle matching yet — every message is treated as a one-off meal. (Originally also inferred a Breakfast/Lunch/Dinner/... `meal_type` label; that concept was removed later — see the note under Database Schema and Phase 5.)
 *Usable for*: the actual day-to-day food logging experience — the core value of the whole project.
 
 ### Phase 3 — Direct manual entry (no API call)
@@ -262,7 +264,7 @@ A lightweight form alongside the chat input: a food/meal label plus a calorie nu
 *Usable for*: logging anything with an already-known calorie count (e.g. off a packaged food's nutrition label) without spending an API call estimating something that doesn't need estimating, and as a fallback path for logging if the Claude API is ever unavailable or budget-constrained.
 
 ### Phase 4 — Direct manipulation of recently logged entries
-Add an interface on the food log page for editing or deleting an already-logged entry: correct the label or calorie count, or remove it outright if it was logged in error. Edits write directly to `log_entry_items` (and `log_entries` if the meal type also needs correcting) — a direct database update, not a re-parse through the Claude API. Editing date/time is explicitly out of scope for this phase (see Open Questions): most corrections are "wrong calorie count" or "typo in the food name," not "wrong timestamp," and it's a separable chunk of work with its own accessibility question (native `<input type="date">` + `<input type="time">` is the likely answer whenever it's tackled — see Open Questions).
+Add an interface on the food log page for editing or deleting an already-logged entry: correct the label or calorie count, or remove it outright if it was logged in error. Edits write directly to `log_entry_items` — a direct database update, not a re-parse through the Claude API. Editing date/time is explicitly out of scope for this phase (see Open Questions): most corrections are "wrong calorie count" or "typo in the food name," not "wrong timestamp," and it's a separable chunk of work with its own accessibility question (native `<input type="date">` + `<input type="time">` is the likely answer whenever it's tackled — see Open Questions). (Originally also let this screen correct a `meal_type` shared across every item in that meal event; that concept was removed later — see Database Schema and Phase 5.)
 *Usable for*: fixing the inevitable case where a Claude estimate is off, a label came out mangled, or a message got sent twice by mistake — without needing to open the SQLite file by hand.
 
 ### Phase 5 — Interface enhancements: repeatable meals & shortcuts (candidates, not commitments)
@@ -271,6 +273,8 @@ Several ideas for cutting down on retyping the same handful of regular meals, ro
 - **Repeat-last shortcut buttons**: one button per meal type ("Repeat last Breakfast," "Repeat last Lunch," "Repeat last Dinner") that copies the most recently logged entry of that meal type — items and calories, unchanged — into a new entry for today, with today's date and the current time. Pure DB read-and-copy, no Claude API call involved, so it's instant and free. The tradeoff: it's a blunt heuristic — it repeats literally the *last* matching meal even if that one was atypical (e.g., a one-off big breakfast), with no sense of what's "typical."
 - **Recent-options variant**: instead of always repeating literally the single most recent entry, show a short summary of each of the last three logged instances of that meal type (e.g., "Omelette, juice, coffee — 550 cal, logged Tue") and let the user pick which one to repeat. Addresses the "atypical last meal" problem above at the cost of a slightly more involved UI — a small picker/list per meal type instead of one button.
 - **Meal bundles (manual save + reuse)**: the more deliberate, named-and-reusable version. Add `meal_bundles` / `meal_bundle_items` tables and a manual "save this as..." action, then match a chat message like "log the salmon rice dish again" against saved bundle names (the `difflib` + candidate-list-in-prompt approach described above) and either log it or ask for clarification. Needs new schema and more UI than the shortcut-button ideas above, but lets a meal be recalled by a memorable name rather than by recency.
+
+**Update, after building this**: the Recent-options variant was the one chosen and built, grouped by meal type as described above. `meal_type` was later removed app-wide entirely (it added friction without real use — see Database Schema), so the repeat panel is no longer grouped by anything: it's a flat, reverse-chronological list covering at least the last 7 days, extended further back only if that window has fewer than 50 meals (handles gaps in logging without capping a genuinely busy recent window). Meal bundles remain unbuilt and, per the same reasoning, would no longer inherit a meal-type dimension either if picked up later.
 
 These can be sequenced independently — repeat-last buttons are the fastest, cheapest win and could ship well before named bundles, if repeating by name (rather than by recency) turns out to matter in practice once the simpler shortcuts are in daily use.
 *Usable for*: reducing how often a normal day's meals require typing out or dictating the same thing again — potentially without a Claude API call at all for the common case.
@@ -283,7 +287,7 @@ Combine what's built so far (Phases 1–4, plus whichever Phase 5 shortcuts ende
 Candidates, not commitments: proactive "save as bundle?" prompting after a repeated-looking ad hoc meal, history/trend views, CSV export for backup, accessibility pass against the WCAG 2.1 AA requirement on the real UI (not just the earlier artifact), first-class mobile layout pass. Nothing here should block calling Phase 6 "done" and usable.
 
 ### Phase 8 — Visual design / beautification (optional, only after 1–7 are solid)
-Candidates, not commitments: a considered color palette and typographic scale beyond the current functional grayscale/system-font baseline, refined spacing and visual hierarchy, small icons for meal types instead of plain text, and light visual branding (the favicon/apple-touch-icon set already in place is a first, minimal step in that direction). Any motion or transitions introduced here must still respect `prefers-reduced-motion` per the existing accessibility requirement, and any new font/icon source still needs explicit sign-off first per the no-silent-additions rule. Deliberately kept separate from Phase 7: that phase is about features and data completeness, this one is purely about how the app looks and feels — the app should already be fully functional and accessible before spending effort here.
+Candidates, not commitments: a considered color palette and typographic scale beyond the current functional grayscale/system-font baseline, refined spacing and visual hierarchy, and light visual branding (the favicon/apple-touch-icon set already in place is a first, minimal step in that direction). Any motion or transitions introduced here must still respect `prefers-reduced-motion` per the existing accessibility requirement, and any new font/icon source still needs explicit sign-off first per the no-silent-additions rule. Deliberately kept separate from Phase 7: that phase is about features and data completeness, this one is purely about how the app looks and feels — the app should already be fully functional and accessible before spending effort here.
 *Usable for*: nothing new becomes usable that wasn't already — this phase makes daily use of the already-complete app more pleasant, not more capable.
 
 ### Phase 9 — Historical dashboard / trends (not yet scoped)

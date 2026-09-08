@@ -27,7 +27,7 @@
           type="text"
           id="message"
           name="message"
-          placeholder="e.g. two eggs and toast for breakfast"
+          placeholder="e.g. two eggs and toast"
           required
           autofocus
         >
@@ -42,7 +42,7 @@
 
     <section class="tab-panel" id="panel-repeat" aria-label="Repeat a previous meal">
       <h2>Repeat a previous meal</h2>
-      {% if has_repeat_options %}
+      {% if repeat_options %}
         <form method="post" action="{{ url_for('food_repeat') }}">
           <label for="repeat_time">Log at time (optional)</label>
           <input type="time" id="repeat_time" name="entry_time">
@@ -53,26 +53,19 @@
             <label><input type="radio" name="entry_date_offset" value="-1"> Yesterday</label>
           </fieldset>
 
-          {% for meal_type in repeatable_meal_types %}
-            {% if repeat_options[meal_type] %}
-              <div class="repeat-group">
-                <h3>{{ meal_type }}</h3>
-                <ul class="repeat-options">
-                  {% for option in repeat_options[meal_type] %}
-                    <li>
-                      <button type="submit" name="entry_id" value="{{ option['entry_id'] }}">
-                        {{ option["items"] | join(", ") }} &mdash; {{ option["total_calories"] }} cal
-                        <span class="repeat-date">{{ option["entry_date"] }}</span>
-                      </button>
-                    </li>
-                  {% endfor %}
-                </ul>
-              </div>
-            {% endif %}
-          {% endfor %}
+          <ul class="repeat-options">
+            {% for option in repeat_options %}
+              <li>
+                <button type="submit" name="entry_id" value="{{ option['entry_id'] }}">
+                  {{ option["items"] | join(", ") }} &mdash; {{ option["total_calories"] }} cal
+                  <span class="repeat-date">{{ option["entry_date"] }} {{ option["entry_time"] }}</span>
+                </button>
+              </li>
+            {% endfor %}
+          </ul>
         </form>
       {% else %}
-        <p>Nothing to repeat yet &mdash; once you've logged a breakfast, lunch, or dinner, it'll show up here for quick re-logging.</p>
+        <p>Nothing to repeat yet &mdash; once you've logged a meal, it'll show up here for quick re-logging.</p>
       {% endif %}
     </section>
 
@@ -84,13 +77,6 @@
 
         <label for="calories">Calories</label>
         <input type="number" id="calories" name="calories" min="1" step="1" required>
-
-        <label for="meal_type">Meal</label>
-        <select id="meal_type" name="meal_type" required>
-          {% for meal in meal_types %}
-            <option value="{{ meal }}">{{ meal }}</option>
-          {% endfor %}
-        </select>
 
         <fieldset class="date-select">
           <legend>Log for</legend>
@@ -128,7 +114,6 @@
             <li class="log-entry">
               <div class="log-entry-meta">
                 <span>{{ entry["entry_time"] }}</span>
-                <span>{{ entry["meal_type"] }}</span>
                 <span class="log-entry-value">{{ entry["calories"] }} cal</span>
                 <span class="row-actions">
                   <a href="{{ url_for('food_entry_edit_form', item_id=entry['item_id']) }}" aria-label="Edit {{ entry['description'] }}">Edit</a>
@@ -165,7 +150,6 @@
             <li class="log-entry">
               <div class="log-entry-meta">
                 <span>{{ entry["entry_time"] }}</span>
-                <span>{{ entry["meal_type"] }}</span>
                 <span class="log-entry-value">{{ entry["calories"] }} cal</span>
                 <span class="row-actions">
                   <a href="{{ url_for('food_entry_edit_form', item_id=entry['item_id']) }}" aria-label="Edit {{ entry['description'] }}">Edit</a>

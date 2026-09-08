@@ -23,9 +23,9 @@ SYSTEM_PROMPT = (
     "'eggs and toast for breakfast' stays two items (Eggs, Toast) since "
     "each is already a complete, independently-recognizable food rather "
     "than a raw component of something else. Only ask for clarification "
-    "when the message is genuinely ambiguous about what was eaten or which "
-    "meal it belongs to -- don't ask about things you can reasonably "
-    "assume. If the message explicitly states what time the food was eaten "
+    "when the message is genuinely ambiguous about what was eaten -- don't "
+    "ask about things you can reasonably assume. If the message explicitly "
+    "states what time the food was eaten "
     "(e.g. 'at 7am', 'around 8:30pm', 'breakfast at 7'), set entry_time to "
     "that time in 24-hour HH:MM format. If no time is stated, omit "
     "entry_time entirely so the app can default to the current time."
@@ -51,10 +51,6 @@ LOG_FOOD_ENTRY_TOOL = {
                     "required": ["food", "estimated_calories", "is_estimate"],
                 },
             },
-            "meal_type": {
-                "type": "string",
-                "enum": ["Breakfast", "Lunch", "Dinner", "Snack", "Dessert", "Drink"],
-            },
             "entry_time": {
                 "type": "string",
                 "description": "24-hour HH:MM time the food was eaten, only if explicitly stated in the message. Omit if no time was mentioned.",
@@ -62,7 +58,7 @@ LOG_FOOD_ENTRY_TOOL = {
             "needs_clarification": {"type": "boolean"},
             "clarification_question": {"type": "string"},
         },
-        "required": ["items", "meal_type", "needs_clarification"],
+        "required": ["items", "needs_clarification"],
     },
 }
 

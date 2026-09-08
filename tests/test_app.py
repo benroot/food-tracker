@@ -26,13 +26,11 @@ TOOL_INPUT_APPLE = {
             "assumption_note": "Assumed 1 medium apple",
         }
     ],
-    "meal_type": "Breakfast",
     "needs_clarification": False,
 }
 
 TOOL_INPUT_CLARIFY = {
     "items": [],
-    "meal_type": "Snack",
     "needs_clarification": True,
     "clarification_question": "How many cookies?",
 }
@@ -100,7 +98,6 @@ class DateSelectorRouteTests(FoodTrackerTestCase):
             data={
                 "food": "Leftover pizza",
                 "calories": "400",
-                "meal_type": "Dinner",
                 "entry_date_offset": "-1",
             },
         )
@@ -119,7 +116,7 @@ class DateSelectorRouteTests(FoodTrackerTestCase):
     def test_food_log_direct_defaults_to_today_when_offset_missing(self):
         self.client.post(
             "/food/log-direct",
-            data={"food": "Cereal", "calories": "200", "meal_type": "Breakfast"},
+            data={"food": "Cereal", "calories": "200"},
         )
 
         with sqlite3.connect(dbmod.DB_PATH) as conn:
@@ -147,8 +144,7 @@ class DateSelectorRouteTests(FoodTrackerTestCase):
     def test_food_repeat_can_target_yesterday(self):
         with sqlite3.connect(dbmod.DB_PATH) as conn:
             cursor = conn.execute(
-                "INSERT INTO log_entries (entry_date, entry_time, meal_type) "
-                "VALUES ('2026-08-20', '08:00', 'Breakfast')"
+                "INSERT INTO log_entries (entry_date, entry_time) VALUES ('2026-08-20', '08:00')"
             )
             entry_id = cursor.lastrowid
             conn.execute(
@@ -210,14 +206,13 @@ class DateSelectorRouteTests(FoodTrackerTestCase):
     def test_food_page_shows_both_today_and_yesterday_entries(self):
         self.client.post(
             "/food/log-direct",
-            data={"food": "Bagel", "calories": "300", "meal_type": "Breakfast"},
+            data={"food": "Bagel", "calories": "300"},
         )
         self.client.post(
             "/food/log-direct",
             data={
                 "food": "Leftover tacos",
                 "calories": "500",
-                "meal_type": "Dinner",
                 "entry_date_offset": "-1",
             },
         )
@@ -272,7 +267,6 @@ class FoodLogRouteTests(FoodTrackerTestCase):
         mock_call_claude.return_value = fake_response(
             {
                 "items": [{"food": "Water", "estimated_calories": 0, "is_estimate": False}],
-                "meal_type": "Drink",
                 "needs_clarification": False,
             }
         )
@@ -281,7 +275,7 @@ class FoodLogRouteTests(FoodTrackerTestCase):
             "/food/log", data={"message": "a glass of water"}, follow_redirects=True
         )
 
-        self.assertIn(b"Logged to Drink: Water (0 cal)", response.data)
+        self.assertIn(b"Logged: Water (0 cal)", response.data)
 
     @patch("claude_client.call_claude")
     def test_ambiguous_entry_holds_for_clarification_without_writing_to_db(self, mock_call_claude):
@@ -312,7 +306,6 @@ class FoodLogRouteTests(FoodTrackerTestCase):
         mock_call_claude.return_value = fake_response(
             {
                 "items": [{"food": "Omelette", "estimated_calories": 400, "is_estimate": False}],
-                "meal_type": "Breakfast",
                 "entry_time": "07:00",
                 "needs_clarification": False,
             }
@@ -331,7 +324,6 @@ class FoodLogRouteTests(FoodTrackerTestCase):
         mock_call_claude.return_value = fake_response(
             {
                 "items": [{"food": "Toast", "estimated_calories": 100, "is_estimate": True}],
-                "meal_type": "Breakfast",
                 "entry_time": "7am",
                 "needs_clarification": False,
             }
@@ -643,7 +635,7 @@ class ManualFoodLogRouteTests(FoodTrackerTestCase):
         with patch("claude_client.call_claude") as mock_call_claude:
             response = self.client.post(
                 "/food/log-direct",
-                data={"food": "Protein bar", "calories": "200", "meal_type": "Snack"},
+                data={"food": "Protein bar", "calories": "200"},
                 follow_redirects=True,
             )
             mock_call_claude.assert_not_called()
@@ -659,7 +651,7 @@ class ManualFoodLogRouteTests(FoodTrackerTestCase):
     def test_non_numeric_calories_does_not_write_and_flashes_error(self):
         response = self.client.post(
             "/food/log-direct",
-            data={"food": "Protein bar", "calories": "a lot", "meal_type": "Snack"},
+            data={"food": "Protein bar", "calories": "a lot"},
             follow_redirects=True,
         )
 
@@ -671,7 +663,7 @@ class ManualFoodLogRouteTests(FoodTrackerTestCase):
     def test_zero_calories_is_rejected(self):
         response = self.client.post(
             "/food/log-direct",
-            data={"food": "Water", "calories": "0", "meal_type": "Drink"},
+            data={"food": "Water", "calories": "0"},
             follow_redirects=True,
         )
 
@@ -683,19 +675,7 @@ class ManualFoodLogRouteTests(FoodTrackerTestCase):
     def test_missing_food_label_does_not_write_and_flashes_error(self):
         response = self.client.post(
             "/food/log-direct",
-            data={"food": "", "calories": "100", "meal_type": "Snack"},
-            follow_redirects=True,
-        )
-
-        self.assertIn(b"Enter a food label", response.data)
-        with sqlite3.connect(dbmod.DB_PATH) as conn:
-            count = conn.execute("SELECT COUNT(*) FROM log_entries").fetchone()[0]
-        self.assertEqual(count, 0)
-
-    def test_invalid_meal_type_does_not_write_and_flashes_error(self):
-        response = self.client.post(
-            "/food/log-direct",
-            data={"food": "Chips", "calories": "150", "meal_type": "Midnight Feast"},
+            data={"food": "", "calories": "100"},
             follow_redirects=True,
         )
 
@@ -709,12 +689,12 @@ class FoodPageOrderingTests(FoodTrackerTestCase):
     def test_todays_entries_show_most_recently_logged_first(self):
         self.client.post(
             "/food/log-direct",
-            data={"food": "Coffee", "calories": "5", "meal_type": "Breakfast"},
+            data={"food": "Coffee", "calories": "5"},
             follow_redirects=True,
         )
         self.client.post(
             "/food/log-direct",
-            data={"food": "Toast", "calories": "150", "meal_type": "Breakfast"},
+            data={"food": "Toast", "calories": "150"},
             follow_redirects=True,
         )
 
@@ -728,7 +708,7 @@ class NetCaloriesDisplayTests(FoodTrackerTestCase):
     def test_plain_total_shown_when_no_exercise_logged_today(self):
         self.client.post(
             "/food/log-direct",
-            data={"food": "Toast", "calories": "150", "meal_type": "Breakfast"},
+            data={"food": "Toast", "calories": "150"},
         )
 
         response = self.client.get("/")
@@ -740,7 +720,7 @@ class NetCaloriesDisplayTests(FoodTrackerTestCase):
     def test_net_calories_shown_when_exercise_logged_today(self):
         self.client.post(
             "/food/log-direct",
-            data={"food": "Toast", "calories": "150", "meal_type": "Breakfast"},
+            data={"food": "Toast", "calories": "150"},
         )
         with sqlite3.connect(dbmod.DB_PATH) as conn:
             conn.execute(
@@ -757,10 +737,9 @@ class NetCaloriesDisplayTests(FoodTrackerTestCase):
 
 
 class EditDeleteEntryRouteTests(FoodTrackerTestCase):
-    def _create_single_item_entry(self, food="Toast", calories=120, meal_type="Breakfast"):
+    def _create_single_item_entry(self, food="Toast", calories=120):
         self.client.post(
-            "/food/log-direct",
-            data={"food": food, "calories": str(calories), "meal_type": meal_type},
+            "/food/log-direct", data={"food": food, "calories": str(calories)}
         )
         with sqlite3.connect(dbmod.DB_PATH) as conn:
             return conn.execute("SELECT id FROM log_entry_items").fetchone()[0]
@@ -773,7 +752,6 @@ class EditDeleteEntryRouteTests(FoodTrackerTestCase):
                         {"food": "Eggs", "estimated_calories": 140, "is_estimate": True},
                         {"food": "Toast", "estimated_calories": 90, "is_estimate": True},
                     ],
-                    "meal_type": "Breakfast",
                     "needs_clarification": False,
                 }
             )
@@ -792,12 +770,12 @@ class EditDeleteEntryRouteTests(FoodTrackerTestCase):
         self.assertIn(b'value="Toast"', response.data)
         self.assertIn(b'value="120"', response.data)
 
-    def test_edit_updates_description_calories_and_meal_type(self):
-        item_id = self._create_single_item_entry(food="Toast", calories=120, meal_type="Breakfast")
+    def test_edit_updates_description_and_calories(self):
+        item_id = self._create_single_item_entry(food="Toast", calories=120)
 
         response = self.client.post(
             f"/food/entries/{item_id}/edit",
-            data={"food": "Buttered toast", "calories": "180", "meal_type": "Lunch"},
+            data={"food": "Buttered toast", "calories": "180"},
             follow_redirects=True,
         )
 
@@ -806,23 +784,14 @@ class EditDeleteEntryRouteTests(FoodTrackerTestCase):
             item = conn.execute(
                 "SELECT description, calories FROM log_entry_items WHERE id = ?", (item_id,)
             ).fetchone()
-            meal_type = conn.execute(
-                """
-                SELECT le.meal_type FROM log_entries le
-                JOIN log_entry_items lei ON lei.log_entry_id = le.id
-                WHERE lei.id = ?
-                """,
-                (item_id,),
-            ).fetchone()[0]
         self.assertEqual(item, ("Buttered toast", 180))
-        self.assertEqual(meal_type, "Lunch")
 
     def test_edit_rejects_invalid_calories_without_writing(self):
         item_id = self._create_single_item_entry(food="Toast", calories=120)
 
         response = self.client.post(
             f"/food/entries/{item_id}/edit",
-            data={"food": "Toast", "calories": "not a number", "meal_type": "Breakfast"},
+            data={"food": "Toast", "calories": "not a number"},
             follow_redirects=True,
         )
 
@@ -832,26 +801,6 @@ class EditDeleteEntryRouteTests(FoodTrackerTestCase):
                 "SELECT calories FROM log_entry_items WHERE id = ?", (item_id,)
             ).fetchone()[0]
         self.assertEqual(calories, 120)
-
-    def test_editing_one_item_of_a_multi_item_meal_changes_meal_type_for_both(self):
-        eggs_id = self._create_multi_item_entry()
-
-        self.client.post(
-            f"/food/entries/{eggs_id}/edit",
-            data={"food": "Eggs", "calories": "140", "meal_type": "Lunch"},
-        )
-
-        with sqlite3.connect(dbmod.DB_PATH) as conn:
-            meal_types = [
-                row[0]
-                for row in conn.execute(
-                    """
-                    SELECT DISTINCT le.meal_type FROM log_entries le
-                    JOIN log_entry_items lei ON lei.log_entry_id = le.id
-                    """
-                ).fetchall()
-            ]
-        self.assertEqual(meal_types, ["Lunch"])
 
     def test_edit_nonexistent_item_flashes_error_and_redirects(self):
         response = self.client.get("/food/entries/9999/edit", follow_redirects=True)
@@ -888,11 +837,11 @@ class EditDeleteEntryRouteTests(FoodTrackerTestCase):
 
 
 class RepeatMealRouteTests(FoodTrackerTestCase):
-    def _seed_past_entry(self, entry_date, meal_type, items):
+    def _seed_past_entry(self, entry_date, items):
         with sqlite3.connect(dbmod.DB_PATH) as conn:
             cursor = conn.execute(
-                "INSERT INTO log_entries (entry_date, entry_time, meal_type) VALUES (?, '08:00', ?)",
-                (entry_date, meal_type),
+                "INSERT INTO log_entries (entry_date, entry_time) VALUES (?, '08:00')",
+                (entry_date,),
             )
             entry_id = cursor.lastrowid
             for description, calories, is_estimate, assumption_note in items:
@@ -906,11 +855,10 @@ class RepeatMealRouteTests(FoodTrackerTestCase):
                 )
         return entry_id
 
-    def test_food_page_shows_up_to_three_most_recent_breakfasts_newest_first(self):
-        self._seed_past_entry("2026-08-19", "Breakfast", [("Cereal", 180, 0, None)])
-        self._seed_past_entry("2026-08-20", "Breakfast", [("Oatmeal", 200, 0, None)])
-        self._seed_past_entry("2026-08-22", "Breakfast", [("Omelette", 400, 0, None)])
-        self._seed_past_entry("2026-08-21", "Breakfast", [("Toast", 150, 0, None)])
+    def test_food_page_shows_recent_meals_newest_first(self):
+        self._seed_past_entry("2026-08-20", [("Oatmeal", 200, 0, None)])
+        self._seed_past_entry("2026-08-22", [("Omelette", 400, 0, None)])
+        self._seed_past_entry("2026-08-21", [("Toast", 150, 0, None)])
 
         response = self.client.get("/")
         body = response.data.decode()
@@ -918,25 +866,17 @@ class RepeatMealRouteTests(FoodTrackerTestCase):
         self.assertIn("Omelette", body)
         self.assertIn("Toast", body)
         self.assertIn("Oatmeal", body)
-        self.assertNotIn("Cereal", body)
         self.assertLess(body.index("Omelette"), body.index("Toast"))
         self.assertLess(body.index("Toast"), body.index("Oatmeal"))
 
     def test_todays_own_entry_is_included_in_repeat_options(self):
         today = date.today().isoformat()
-        self._seed_past_entry(today, "Breakfast", [("Pancakes", 300, 0, None)])
+        self._seed_past_entry(today, [("Pancakes", 300, 0, None)])
 
         response = self.client.get("/")
 
         self.assertIn(b"Pancakes", response.data)
         self.assertNotIn(b"Nothing to repeat yet", response.data)
-
-    def test_only_breakfast_lunch_dinner_are_repeatable(self):
-        self._seed_past_entry("2026-08-20", "Snack", [("Chips", 150, 0, None)])
-
-        response = self.client.get("/")
-
-        self.assertIn(b"Nothing to repeat yet", response.data)
 
     def test_empty_state_when_no_past_meals(self):
         response = self.client.get("/")
@@ -945,7 +885,6 @@ class RepeatMealRouteTests(FoodTrackerTestCase):
     def test_repeating_a_meal_copies_items_to_today_preserving_estimate_flag(self):
         entry_id = self._seed_past_entry(
             "2026-08-20",
-            "Breakfast",
             [("Omelette", 400, 0, None), ("Juice", 110, 1, "Assumed 8oz")],
         )
 
@@ -957,7 +896,7 @@ class RepeatMealRouteTests(FoodTrackerTestCase):
         with sqlite3.connect(dbmod.DB_PATH) as conn:
             today_rows = conn.execute(
                 """
-                SELECT lei.description, lei.calories, lei.is_estimate, lei.assumption_note, le.meal_type
+                SELECT lei.description, lei.calories, lei.is_estimate, lei.assumption_note
                 FROM log_entry_items lei
                 JOIN log_entries le ON le.id = lei.log_entry_id
                 WHERE le.entry_date = ?
@@ -966,12 +905,11 @@ class RepeatMealRouteTests(FoodTrackerTestCase):
                 (date.today().isoformat(),),
             ).fetchall()
         self.assertEqual(len(today_rows), 2)
-        self.assertEqual(today_rows[0][:4], ("Omelette", 400, 0, None))
-        self.assertEqual(today_rows[1][:4], ("Juice", 110, 1, "Assumed 8oz"))
-        self.assertEqual(today_rows[0][4], "Breakfast")
+        self.assertEqual(tuple(today_rows[0]), ("Omelette", 400, 0, None))
+        self.assertEqual(tuple(today_rows[1]), ("Juice", 110, 1, "Assumed 8oz"))
 
     def test_repeating_with_explicit_time_uses_that_time(self):
-        entry_id = self._seed_past_entry("2026-08-20", "Breakfast", [("Omelette", 400, 0, None)])
+        entry_id = self._seed_past_entry("2026-08-20", [("Omelette", 400, 0, None)])
 
         self.client.post("/food/repeat", data={"entry_id": str(entry_id), "entry_time": "07:00"})
 
@@ -983,7 +921,7 @@ class RepeatMealRouteTests(FoodTrackerTestCase):
         self.assertEqual(entry_time, "07:00")
 
     def test_repeating_with_blank_time_falls_back_to_current_time(self):
-        entry_id = self._seed_past_entry("2026-08-20", "Breakfast", [("Omelette", 400, 0, None)])
+        entry_id = self._seed_past_entry("2026-08-20", [("Omelette", 400, 0, None)])
 
         self.client.post("/food/repeat", data={"entry_id": str(entry_id), "entry_time": ""})
 
@@ -1003,6 +941,64 @@ class RepeatMealRouteTests(FoodTrackerTestCase):
     def test_repeating_with_missing_entry_id_flashes_error(self):
         response = self.client.post("/food/repeat", data={}, follow_redirects=True)
         self.assertIn(b"no longer exists", response.data)
+
+
+class RecentMealOptionsHeuristicTests(FoodTrackerTestCase):
+    """Directly exercises the 7-day / 50-item repeat-options heuristic
+    without needing to seed 50 real rows through the HTTP layer."""
+
+    def _seed_meal(self, entry_date, description="Meal", calories=100):
+        with sqlite3.connect(dbmod.DB_PATH) as conn:
+            cursor = conn.execute(
+                "INSERT INTO log_entries (entry_date, entry_time) VALUES (?, '08:00')",
+                (entry_date,),
+            )
+            entry_id = cursor.lastrowid
+            conn.execute(
+                "INSERT INTO log_entry_items (log_entry_id, description, calories, is_estimate) "
+                "VALUES (?, ?, ?, 0)",
+                (entry_id, description, calories),
+            )
+
+    def _query(self, min_days, min_count):
+        conn = sqlite3.connect(dbmod.DB_PATH)
+        conn.row_factory = sqlite3.Row
+        try:
+            return appmod._recent_meal_options(conn, min_days=min_days, min_count=min_count)
+        finally:
+            conn.close()
+
+    def test_window_extends_backward_to_reach_min_count_when_sparse(self):
+        self._seed_meal("2026-08-01", "Old meal")
+        yesterday = (date.today() - timedelta(days=1)).isoformat()
+        self._seed_meal(yesterday, "Yesterday meal")
+        self._seed_meal(date.today().isoformat(), "Today meal")
+
+        options = self._query(min_days=7, min_count=3)
+
+        self.assertEqual(len(options), 3)
+        self.assertEqual(options[0]["items"], ["Today meal"])
+        self.assertEqual(options[2]["items"], ["Old meal"])
+
+    def test_window_never_shrinks_below_min_days_even_past_min_count(self):
+        for offset in range(4):
+            day = (date.today() - timedelta(days=offset)).isoformat()
+            self._seed_meal(day, f"Meal {offset}")
+
+        options = self._query(min_days=7, min_count=2)
+
+        self.assertEqual(len(options), 4)
+
+    def test_reverse_chronological_order(self):
+        self._seed_meal("2026-08-19", "Cereal")
+        self._seed_meal("2026-08-20", "Oatmeal")
+        self._seed_meal("2026-08-22", "Omelette")
+        self._seed_meal("2026-08-21", "Toast")
+
+        options = self._query(min_days=7, min_count=50)
+
+        dates_in_order = [option["entry_date"] for option in options]
+        self.assertEqual(dates_in_order, ["2026-08-22", "2026-08-21", "2026-08-20", "2026-08-19"])
 
 
 class WeightLogRouteTests(FoodTrackerTestCase):

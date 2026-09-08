@@ -231,15 +231,6 @@ nav a:focus-visible {
   padding: 0.3rem 0.6rem;
 }
 
-.repeat-group {
-  margin-bottom: 1rem;
-}
-
-.repeat-group h3 {
-  font-size: 1rem;
-  margin-bottom: 0.4rem;
-}
-
 .repeat-options {
   list-style: none;
   padding: 0;

@@ -18,7 +18,6 @@ TOOL_USE_BLOCK = {
                 "assumption_note": "Assumed 1 medium apple",
             }
         ],
-        "meal_type": "Breakfast",
         "needs_clarification": False,
     },
 }

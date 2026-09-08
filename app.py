@@ -10,9 +10,9 @@ from config import load_env_file
 
 load_env_file()
 
-MEAL_TYPES = ("Breakfast", "Lunch", "Dinner", "Snack", "Dessert", "Drink")
-REPEATABLE_MEAL_TYPES = ("Breakfast", "Lunch", "Dinner")
 RECENT_OPTIONS_LIMIT = 3
+RECENT_MEAL_MIN_DAYS = 7
+RECENT_MEAL_MIN_COUNT = 50
 TIME_PATTERN = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 
@@ -29,33 +29,53 @@ def _resolve_entry_date(raw_offset):
     return date.today() + timedelta(days=offset)
 
 
-def _recent_meal_options(db, meal_type, limit=RECENT_OPTIONS_LIMIT):
-    # Today's own entries are included -- repeating the same meal twice in
-    # one day is a legitimate case, not just a same-day-repeat edge case.
-    entry_rows = db.execute(
+def _recent_meal_options(db, min_days=RECENT_MEAL_MIN_DAYS, min_count=RECENT_MEAL_MIN_COUNT):
+    """Recent meals to offer for repeating: a flat, reverse-chronological
+    list (no more meal-type grouping -- that concept is gone). Covers at
+    least min_days of history, extended further back only if that window
+    doesn't already contain min_count meals -- handles gaps in logging
+    without capping a genuinely busy recent window. Today's own entries are
+    included, same as before: repeating the same meal twice in one day is
+    a legitimate case, not an edge case to exclude."""
+    window_start = (date.today() - timedelta(days=min_days - 1)).isoformat()
+    windowed_count = db.execute(
+        "SELECT COUNT(*) FROM log_entries WHERE entry_date >= ?", (window_start,)
+    ).fetchone()[0]
+    limit = max(windowed_count, min_count)
+
+    rows = db.execute(
         """
-        SELECT id, entry_date FROM log_entries
-        WHERE meal_type = ?
-        ORDER BY entry_date DESC, entry_time DESC, id DESC
-        LIMIT ?
+        SELECT le.id AS entry_id, le.entry_date, le.entry_time,
+               lei.description, lei.calories
+        FROM log_entries le
+        JOIN log_entry_items lei ON lei.log_entry_id = le.id
+        WHERE le.id IN (
+            SELECT id FROM log_entries
+            ORDER BY entry_date DESC, entry_time DESC, id DESC
+            LIMIT ?
+        )
+        ORDER BY le.entry_date DESC, le.entry_time DESC, le.id DESC, lei.id ASC
         """,
-        (meal_type, limit),
+        (limit,),
     ).fetchall()
 
     options = []
-    for entry_row in entry_rows:
-        items = db.execute(
-            "SELECT description, calories FROM log_entry_items WHERE log_entry_id = ?",
-            (entry_row["id"],),
-        ).fetchall()
-        options.append(
-            {
-                "entry_id": entry_row["id"],
-                "entry_date": entry_row["entry_date"],
-                "items": [item["description"] for item in items],
-                "total_calories": sum(item["calories"] for item in items),
+    by_entry_id = {}
+    for row in rows:
+        entry_id = row["entry_id"]
+        option = by_entry_id.get(entry_id)
+        if option is None:
+            option = {
+                "entry_id": entry_id,
+                "entry_date": row["entry_date"],
+                "entry_time": row["entry_time"],
+                "items": [],
+                "total_calories": 0,
             }
-        )
+            by_entry_id[entry_id] = option
+            options.append(option)
+        option["items"].append(row["description"])
+        option["total_calories"] += row["calories"]
     return options
 
 
@@ -85,7 +105,7 @@ def _recent_exercise_options(db, limit=RECENT_OPTIONS_LIMIT):
 def _food_day_summary(db, day, label):
     entries = db.execute(
         """
-        SELECT lei.id AS item_id, le.meal_type, le.entry_time,
+        SELECT lei.id AS item_id, le.entry_time,
                lei.description, lei.quantity, lei.calories,
                lei.is_estimate, lei.assumption_note
         FROM log_entries le
@@ -386,19 +406,13 @@ def food_page():
     db = dbmod.get_db()
     today_summary = _food_day_summary(db, date.today(), "Today")
     yesterday_summary = _food_day_summary(db, date.today() - timedelta(days=1), "Yesterday")
-    repeat_options = {
-        meal_type: _recent_meal_options(db, meal_type)
-        for meal_type in REPEATABLE_MEAL_TYPES
-    }
+    repeat_options = _recent_meal_options(db)
     return render_template(
         "food.html",
         today=today_summary,
         yesterday=yesterday_summary,
         pending_question=session.get("pending_question"),
-        meal_types=MEAL_TYPES,
-        repeatable_meal_types=REPEATABLE_MEAL_TYPES,
         repeat_options=repeat_options,
-        has_repeat_options=any(repeat_options.values()),
     )
 
 
@@ -440,8 +454,8 @@ def food_log():
     parsed_time = tool_input.get("entry_time")
     entry_time = parsed_time if parsed_time and TIME_PATTERN.match(parsed_time) else now.strftime("%H:%M")
     cursor = db.execute(
-        "INSERT INTO log_entries (entry_date, entry_time, meal_type) VALUES (?, ?, ?)",
-        (entry_date.isoformat(), entry_time, tool_input["meal_type"]),
+        "INSERT INTO log_entries (entry_date, entry_time) VALUES (?, ?)",
+        (entry_date.isoformat(), entry_time),
     )
     log_entry_id = cursor.lastrowid
     for item in tool_input["items"]:
@@ -465,7 +479,7 @@ def food_log():
     session.pop("pending_conversation", None)
     session.pop("pending_question", None)
     summary = ", ".join(_describe_logged_item(item) for item in tool_input["items"])
-    flash(f'Logged to {tool_input["meal_type"]}: {summary}', "success")
+    flash(f"Logged: {summary}", "success")
     return redirect(url_for("food_page"))
 
 
@@ -473,10 +487,9 @@ def food_log():
 def food_log_direct():
     food = request.form.get("food", "").strip()
     calories_raw = request.form.get("calories", "").strip()
-    meal_type = request.form.get("meal_type", "").strip()
 
-    if not food or meal_type not in MEAL_TYPES:
-        flash("Enter a food label and pick a meal.", "error")
+    if not food:
+        flash("Enter a food label.", "error")
         return redirect(url_for("food_page"))
 
     try:
@@ -491,8 +504,8 @@ def food_log_direct():
     now = datetime.now()
     entry_date = _resolve_entry_date(request.form.get("entry_date_offset"))
     cursor = db.execute(
-        "INSERT INTO log_entries (entry_date, entry_time, meal_type) VALUES (?, ?, ?)",
-        (entry_date.isoformat(), now.strftime("%H:%M"), meal_type),
+        "INSERT INTO log_entries (entry_date, entry_time) VALUES (?, ?)",
+        (entry_date.isoformat(), now.strftime("%H:%M")),
     )
     db.execute(
         """
@@ -504,7 +517,7 @@ def food_log_direct():
     )
     db.commit()
 
-    flash(f"Logged to {meal_type}: {food} ({calories} cal)", "success")
+    flash(f"Logged: {food} ({calories} cal)", "success")
     return redirect(url_for("food_page"))
 
 
@@ -517,9 +530,6 @@ def food_repeat():
     entry_id = int(raw_entry_id)
 
     db = dbmod.get_db()
-    source_entry = db.execute(
-        "SELECT meal_type FROM log_entries WHERE id = ?", (entry_id,)
-    ).fetchone()
     source_items = db.execute(
         """
         SELECT description, quantity, calories, is_estimate, assumption_note
@@ -527,7 +537,7 @@ def food_repeat():
         """,
         (entry_id,),
     ).fetchall()
-    if source_entry is None or not source_items:
+    if not source_items:
         flash("That meal no longer exists.", "error")
         return redirect(url_for("food_page"))
 
@@ -536,8 +546,8 @@ def food_repeat():
     requested_time = request.form.get("entry_time", "").strip()
     entry_time = requested_time if requested_time and TIME_PATTERN.match(requested_time) else now.strftime("%H:%M")
     cursor = db.execute(
-        "INSERT INTO log_entries (entry_date, entry_time, meal_type) VALUES (?, ?, ?)",
-        (entry_date.isoformat(), entry_time, source_entry["meal_type"]),
+        "INSERT INTO log_entries (entry_date, entry_time) VALUES (?, ?)",
+        (entry_date.isoformat(), entry_time),
     )
     new_entry_id = cursor.lastrowid
     for item in source_items:
@@ -559,7 +569,7 @@ def food_repeat():
     db.commit()
 
     summary = ", ".join(f'{item["description"]} ({item["calories"]} cal)' for item in source_items)
-    flash(f'Logged to {source_entry["meal_type"]}: {summary}', "success")
+    flash(f"Logged: {summary}", "success")
     return redirect(url_for("food_page"))
 
 
@@ -567,26 +577,20 @@ def food_repeat():
 def food_entry_edit_form(item_id):
     db = dbmod.get_db()
     entry = db.execute(
-        """
-        SELECT lei.id AS item_id, lei.description, lei.calories, le.meal_type,
-               (SELECT COUNT(*) FROM log_entry_items WHERE log_entry_id = le.id) AS sibling_count
-        FROM log_entry_items lei
-        JOIN log_entries le ON le.id = lei.log_entry_id
-        WHERE lei.id = ?
-        """,
+        "SELECT id AS item_id, description, calories FROM log_entry_items WHERE id = ?",
         (item_id,),
     ).fetchone()
     if entry is None:
         flash("That entry no longer exists.", "error")
         return redirect(url_for("food_page"))
-    return render_template("edit_entry.html", entry=entry, meal_types=MEAL_TYPES)
+    return render_template("edit_entry.html", entry=entry)
 
 
 @app.route("/food/entries/<int:item_id>/edit", methods=["POST"])
 def food_entry_edit(item_id):
     db = dbmod.get_db()
     row = db.execute(
-        "SELECT log_entry_id FROM log_entry_items WHERE id = ?", (item_id,)
+        "SELECT id FROM log_entry_items WHERE id = ?", (item_id,)
     ).fetchone()
     if row is None:
         flash("That entry no longer exists.", "error")
@@ -594,10 +598,9 @@ def food_entry_edit(item_id):
 
     food = request.form.get("food", "").strip()
     calories_raw = request.form.get("calories", "").strip()
-    meal_type = request.form.get("meal_type", "").strip()
 
-    if not food or meal_type not in MEAL_TYPES:
-        flash("Enter a food label and pick a meal.", "error")
+    if not food:
+        flash("Enter a food label.", "error")
         return redirect(url_for("food_entry_edit_form", item_id=item_id))
 
     try:
@@ -611,10 +614,6 @@ def food_entry_edit(item_id):
     db.execute(
         "UPDATE log_entry_items SET description = ?, calories = ? WHERE id = ?",
         (food, calories, item_id),
-    )
-    db.execute(
-        "UPDATE log_entries SET meal_type = ? WHERE id = ?",
-        (meal_type, row["log_entry_id"]),
     )
     db.commit()
 
