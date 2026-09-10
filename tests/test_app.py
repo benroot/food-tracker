@@ -1032,5 +1032,66 @@ class WeightLogRouteTests(FoodTrackerTestCase):
         self.assertIn(b"No weight logged yet.", response.data)
 
 
+class TrendsRouteTests(FoodTrackerTestCase):
+    def _seed_entry(self, entry_date, items):
+        """items: list of (description, calories) tuples logged as one meal event."""
+        with sqlite3.connect(dbmod.DB_PATH) as conn:
+            cursor = conn.execute(
+                "INSERT INTO log_entries (entry_date, entry_time) VALUES (?, '08:00')",
+                (entry_date,),
+            )
+            entry_id = cursor.lastrowid
+            for description, calories in items:
+                conn.execute(
+                    "INSERT INTO log_entry_items (log_entry_id, description, calories, is_estimate) "
+                    "VALUES (?, ?, ?, 0)",
+                    (entry_id, description, calories),
+                )
+
+    def _trends(self, window_days=30):
+        conn = sqlite3.connect(dbmod.DB_PATH)
+        conn.row_factory = sqlite3.Row
+        try:
+            return appmod._daily_food_trends(conn, window_days=window_days)
+        finally:
+            conn.close()
+
+    def test_page_renders_window_days_zero_filled_reverse_chronological(self):
+        response = self.client.get("/trends")
+        self.assertEqual(response.status_code, 200)
+
+        rendered = response.data.decode()
+        dates_in_order = [
+            (date.today() - timedelta(days=offset)).isoformat() for offset in range(30)
+        ]
+        positions = [rendered.index(d) for d in dates_in_order]
+        self.assertEqual(positions, sorted(positions))
+        self.assertIn("0 entries", rendered)
+
+    def test_multi_item_meal_counts_as_one_entry(self):
+        today = date.today().isoformat()
+        self._seed_entry(today, [("Eggs", 140), ("Toast", 120), ("Coffee", 5)])
+
+        days = self._trends()
+
+        todays_row = next(d for d in days if d["entry_date"] == today)
+        self.assertEqual(todays_row["entry_count"], 1)
+        self.assertEqual(todays_row["total_calories"], 265)
+
+    def test_boundary_day_is_included_but_one_day_older_is_excluded(self):
+        boundary = (date.today() - timedelta(days=29)).isoformat()
+        too_old = (date.today() - timedelta(days=30)).isoformat()
+        self._seed_entry(boundary, [("Boundary meal", 50)])
+        self._seed_entry(too_old, [("Too old meal", 999)])
+
+        days = self._trends(window_days=30)
+        dates = [d["entry_date"] for d in days]
+
+        self.assertIn(boundary, dates)
+        self.assertNotIn(too_old, dates)
+        boundary_row = next(d for d in days if d["entry_date"] == boundary)
+        self.assertEqual(boundary_row["total_calories"], 50)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Trends{% endblock %}
+{% block content %}
+  <h1>Trends</h1>
+  <p>Last {{ window_days }} days.</p>
+
+  <ul class="log-list">
+    {% for day in days %}
+      <li class="log-entry">
+        <div class="log-entry-meta">
+          <span>{{ day["entry_date"] }}</span>
+          <span class="log-entry-value">{{ day["total_calories"] }} cal</span>
+        </div>
+        <div class="log-entry-description">
+          {{ day["entry_count"] }} {{ "entry" if day["entry_count"] == 1 else "entries" }}
+        </div>
+      </li>
+    {% endfor %}
+  </ul>
+{% endblock %}

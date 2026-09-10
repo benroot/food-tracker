@@ -13,6 +13,7 @@ load_env_file()
 RECENT_OPTIONS_LIMIT = 3
 RECENT_MEAL_MIN_DAYS = 7
 RECENT_MEAL_MIN_COUNT = 50
+TRENDS_WINDOW_DAYS = 30
 TIME_PATTERN = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 
@@ -144,6 +145,41 @@ def _exercise_day_summary(db, day, label):
         "entries": entries,
         "total_calories_burned": sum(entry["calories_burned"] for entry in entries),
     }
+
+
+def _daily_food_trends(db, window_days=TRENDS_WINDOW_DAYS):
+    """Per-day entry count and total calories for the last window_days days,
+    reverse chronological, zero-filled for days with no logging -- gaps are
+    kept visible rather than silently skipped, per Phase 9. "Entry count" is
+    meal events (log_entries rows), not individual food items: a 3-item
+    breakfast counts as 1."""
+    window_start = (date.today() - timedelta(days=window_days - 1)).isoformat()
+    rows = db.execute(
+        """
+        SELECT le.entry_date AS entry_date,
+               COUNT(DISTINCT le.id) AS entry_count,
+               COALESCE(SUM(lei.calories), 0) AS total_calories
+        FROM log_entries le
+        LEFT JOIN log_entry_items lei ON lei.log_entry_id = le.id
+        WHERE le.entry_date >= ?
+        GROUP BY le.entry_date
+        """,
+        (window_start,),
+    ).fetchall()
+    by_date = {row["entry_date"]: row for row in rows}
+
+    days = []
+    for offset in range(window_days):
+        day = (date.today() - timedelta(days=offset)).isoformat()
+        row = by_date.get(day)
+        days.append(
+            {
+                "entry_date": day,
+                "entry_count": row["entry_count"] if row else 0,
+                "total_calories": row["total_calories"] if row else 0,
+            }
+        )
+    return days
 
 
 app = Flask(__name__)
@@ -421,6 +457,13 @@ def _describe_logged_item(item):
     if item.get("assumption_note"):
         description += f' -- {item["assumption_note"]}'
     return description
+
+
+@app.route("/trends", methods=["GET"])
+def trends_page():
+    db = dbmod.get_db()
+    days = _daily_food_trends(db)
+    return render_template("trends.html", days=days, window_days=TRENDS_WINDOW_DAYS)
 
 
 @app.route("/food/log", methods=["POST"])
