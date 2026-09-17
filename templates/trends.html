@@ -4,17 +4,27 @@
   <h1>Trends</h1>
   <p>Last {{ window_days }} days.</p>
 
-  <ul class="log-list">
-    {% for day in days %}
-      <li class="log-entry">
-        <div class="log-entry-meta">
-          <span>{{ day["entry_date"] }}</span>
-          <span class="log-entry-value">{{ day["total_calories"] }} cal</span>
-        </div>
-        <div class="log-entry-description">
-          {{ day["entry_count"] }} {{ "entry" if day["entry_count"] == 1 else "entries" }}
-        </div>
-      </li>
-    {% endfor %}
-  </ul>
+  <section class="sparkline-section" aria-label="Weight trend">
+    <h2>Weight</h2>
+    {% if weight_sparkline %}
+      <svg class="sparkline" viewBox="0 0 {{ weight_sparkline.width }} {{ weight_sparkline.height }}" aria-hidden="true">
+        <polyline points="{{ weight_sparkline.points }}" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />
+      </svg>
+      <p class="sparkline-caption">{{ weight_caption }}</p>
+    {% else %}
+      <p>No weight logged in the last {{ window_days }} days.</p>
+    {% endif %}
+  </section>
+
+  <section class="sparkline-section" aria-label="Calorie trend">
+    <h2>Calories</h2>
+    {% if calorie_sparkline %}
+      <svg class="sparkline" viewBox="0 0 {{ calorie_sparkline.width }} {{ calorie_sparkline.height }}" aria-hidden="true">
+        <polyline points="{{ calorie_sparkline.points }}" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />
+      </svg>
+      <p class="sparkline-caption">{{ calorie_caption }}</p>
+    {% else %}
+      <p>No calories logged in the last {{ window_days }} days.</p>
+    {% endif %}
+  </section>
 {% endblock %}

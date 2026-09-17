@@ -196,6 +196,74 @@ def _daily_food_trends(db, window_days=TRENDS_WINDOW_DAYS):
     return days
 
 
+SPARKLINE_WIDTH = 280
+SPARKLINE_HEIGHT = 56
+SPARKLINE_PAD = 4
+
+
+def _weight_trend(db, window_days=TRENDS_WINDOW_DAYS):
+    """Actual logged weight entries within the window, chronological, as
+    (day_offset, weight_lbs) pairs -- NOT zero-filled like food's daily trend.
+    Weight logging is inherently sparse (you don't necessarily weigh in every
+    day), and a missing day isn't a meaningful "0 lbs" the way a missing food
+    day is legitimately "0 cal". day_offset is days elapsed from the window
+    start (0..window_days-1), not list position, so a real gap between logs
+    renders as a stretched-out flat segment on the sparkline rather than being
+    visually compressed away."""
+    window_start = date.today() - timedelta(days=window_days - 1)
+    rows = db.execute(
+        "SELECT entry_date, weight_lbs FROM weight_log WHERE entry_date >= ? ORDER BY entry_date ASC",
+        (window_start.isoformat(),),
+    ).fetchall()
+    return [
+        ((date.fromisoformat(row["entry_date"]) - window_start).days, row["weight_lbs"])
+        for row in rows
+    ]
+
+
+def _calorie_trend(db, window_days=TRENDS_WINDOW_DAYS):
+    """Total calories per day as (day_offset, total_calories) pairs, oldest
+    first -- built from _daily_food_trends' already-zero-filled, today-first
+    list, just reordered and re-indexed for sparkline plotting."""
+    chronological = list(reversed(_daily_food_trends(db, window_days=window_days)))
+    return [(offset, day["total_calories"]) for offset, day in enumerate(chronological)]
+
+
+def _sparkline_svg(points, window_days, width=SPARKLINE_WIDTH, height=SPARKLINE_HEIGHT, pad=SPARKLINE_PAD):
+    """Turn (day_offset, value) points into SVG polyline coordinates. Y is
+    tight-fit to the data's own min/max, not zero-anchored -- standard
+    sparkline convention, needed so a few lbs or a few hundred calories of
+    day-to-day variation still reads as visible movement instead of a flat
+    line. X is proportional to day_offset (not list position), so real time
+    gaps in sparse data (e.g. weight) show up as stretched flat segments
+    rather than being compressed away. Returns None if there's nothing to
+    plot at all."""
+    if not points:
+        return None
+    values = [v for _, v in points]
+    lo, hi = min(values), max(values)
+    span = hi - lo
+    denom = max(window_days - 1, 1)
+
+    def x_at(offset):
+        return pad + (width - 2 * pad) * offset / denom
+
+    def y_at(v):
+        if span == 0:
+            return height / 2
+        return pad + (height - 2 * pad) * (1 - (v - lo) / span)
+
+    coords = " ".join(f"{x_at(offset):.1f},{y_at(v):.1f}" for offset, v in points)
+    return {
+        "points": coords,
+        "width": width,
+        "height": height,
+        "min": lo,
+        "max": hi,
+        "latest": points[-1][1],
+    }
+
+
 app = Flask(__name__)
 app.secret_key = secrets.token_hex(32)
 
@@ -493,8 +561,36 @@ def _describe_logged_item(item):
 @app.route("/trends", methods=["GET"])
 def trends_page():
     db = dbmod.get_db()
-    days = _daily_food_trends(db)
-    return render_template("trends.html", days=days, window_days=TRENDS_WINDOW_DAYS)
+
+    weight_points = _weight_trend(db)
+    weight_sparkline = _sparkline_svg(weight_points, TRENDS_WINDOW_DAYS)
+    weight_caption = None
+    if weight_sparkline:
+        latest_offset, latest_value = weight_points[-1]
+        latest_date = date.today() - timedelta(days=TRENDS_WINDOW_DAYS - 1 - latest_offset)
+        when = "" if latest_date == date.today() else f" on {latest_date.isoformat()}"
+        weight_caption = (
+            f'{latest_value:g} lbs{when} · '
+            f'range {weight_sparkline["min"]:g}–{weight_sparkline["max"]:g}'
+        )
+
+    calorie_points = _calorie_trend(db)
+    calorie_sparkline = _sparkline_svg(calorie_points, TRENDS_WINDOW_DAYS)
+    calorie_caption = None
+    if calorie_sparkline:
+        calorie_caption = (
+            f'{calorie_sparkline["latest"]} cal today · '
+            f'range {calorie_sparkline["min"]}–{calorie_sparkline["max"]}'
+        )
+
+    return render_template(
+        "trends.html",
+        window_days=TRENDS_WINDOW_DAYS,
+        weight_sparkline=weight_sparkline,
+        weight_caption=weight_caption,
+        calorie_sparkline=calorie_sparkline,
+        calorie_caption=calorie_caption,
+    )
 
 
 @app.route("/food/log", methods=["POST"])

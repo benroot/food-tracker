@@ -1058,17 +1058,25 @@ class TrendsRouteTests(FoodTrackerTestCase):
         finally:
             conn.close()
 
-    def test_page_renders_window_days_zero_filled_reverse_chronological(self):
-        response = self.client.get("/trends")
-        self.assertEqual(response.status_code, 200)
+    def test_page_renders_both_sparklines(self):
+        self._seed_entry(date.today().isoformat(), [("Eggs", 300)])
+        with sqlite3.connect(dbmod.DB_PATH) as conn:
+            conn.execute(
+                "INSERT INTO weight_log (entry_date, weight_lbs) VALUES (?, ?)",
+                (date.today().isoformat(), 182.5),
+            )
 
+        response = self.client.get("/trends")
+
+        self.assertEqual(response.status_code, 200)
         rendered = response.data.decode()
-        dates_in_order = [
-            (date.today() - timedelta(days=offset)).isoformat() for offset in range(30)
-        ]
-        positions = [rendered.index(d) for d in dates_in_order]
-        self.assertEqual(positions, sorted(positions))
-        self.assertIn("0 entries", rendered)
+        self.assertEqual(rendered.count("<svg"), 2)
+        self.assertIn("182.5 lbs", rendered)
+        self.assertIn("300 cal today", rendered)
+
+    def test_no_weight_logged_shows_empty_state(self):
+        response = self.client.get("/trends")
+        self.assertIn(b"No weight logged in the last 30 days.", response.data)
 
     def test_multi_item_meal_counts_as_one_entry(self):
         today = date.today().isoformat()
@@ -1093,6 +1101,102 @@ class TrendsRouteTests(FoodTrackerTestCase):
         self.assertNotIn(too_old, dates)
         boundary_row = next(d for d in days if d["entry_date"] == boundary)
         self.assertEqual(boundary_row["total_calories"], 50)
+
+
+class WeightTrendTests(FoodTrackerTestCase):
+    def _seed_weight(self, entry_date, weight_lbs):
+        with sqlite3.connect(dbmod.DB_PATH) as conn:
+            conn.execute(
+                "INSERT INTO weight_log (entry_date, weight_lbs) VALUES (?, ?)",
+                (entry_date, weight_lbs),
+            )
+
+    def _trend(self, window_days=30):
+        conn = sqlite3.connect(dbmod.DB_PATH)
+        conn.row_factory = sqlite3.Row
+        try:
+            return appmod._weight_trend(conn, window_days=window_days)
+        finally:
+            conn.close()
+
+    def test_no_entries_returns_empty_list(self):
+        self.assertEqual(self._trend(), [])
+
+    def test_sparse_entries_get_correct_day_offsets(self):
+        window_start = date.today() - timedelta(days=29)
+        self._seed_weight(window_start.isoformat(), 180.0)
+        self._seed_weight(date.today().isoformat(), 183.5)
+
+        self.assertEqual(self._trend(), [(0, 180.0), (29, 183.5)])
+
+    def test_entries_outside_window_are_excluded(self):
+        too_old = (date.today() - timedelta(days=30)).isoformat()
+        self._seed_weight(too_old, 999.0)
+
+        self.assertEqual(self._trend(), [])
+
+
+class CalorieTrendTests(FoodTrackerTestCase):
+    def _seed_entry(self, entry_date, calories):
+        with sqlite3.connect(dbmod.DB_PATH) as conn:
+            cursor = conn.execute(
+                "INSERT INTO log_entries (entry_date, entry_time) VALUES (?, '08:00')",
+                (entry_date,),
+            )
+            conn.execute(
+                "INSERT INTO log_entry_items (log_entry_id, description, calories, is_estimate) "
+                "VALUES (?, 'Meal', ?, 0)",
+                (cursor.lastrowid, calories),
+            )
+
+    def _trend(self, window_days=30):
+        conn = sqlite3.connect(dbmod.DB_PATH)
+        conn.row_factory = sqlite3.Row
+        try:
+            return appmod._calorie_trend(conn, window_days=window_days)
+        finally:
+            conn.close()
+
+    def test_oldest_first_with_zero_fill(self):
+        window_start = date.today() - timedelta(days=29)
+        self._seed_entry(window_start.isoformat(), 300)
+        self._seed_entry(date.today().isoformat(), 500)
+
+        points = self._trend()
+
+        self.assertEqual(len(points), 30)
+        self.assertEqual(points[0], (0, 300))
+        self.assertEqual(points[-1], (29, 500))
+        self.assertEqual(points[15][1], 0)
+
+
+class SparklineHelperTests(unittest.TestCase):
+    def test_empty_points_returns_none(self):
+        self.assertIsNone(appmod._sparkline_svg([], window_days=30))
+
+    def test_min_value_maps_near_bottom_max_near_top(self):
+        result = appmod._sparkline_svg([(0, 100), (29, 200)], window_days=30)
+        coords = [pair.split(",") for pair in result["points"].split(" ")]
+        first_x, first_y = float(coords[0][0]), float(coords[0][1])
+        second_x, second_y = float(coords[1][0]), float(coords[1][1])
+
+        self.assertLess(first_x, second_x)
+        self.assertGreater(first_y, second_y)
+        self.assertEqual(result["min"], 100)
+        self.assertEqual(result["max"], 200)
+        self.assertEqual(result["latest"], 200)
+
+    def test_flat_data_centers_vertically(self):
+        result = appmod._sparkline_svg([(0, 150), (10, 150), (29, 150)], window_days=30)
+        ys = [float(pair.split(",")[1]) for pair in result["points"].split(" ")]
+        self.assertTrue(all(y == appmod.SPARKLINE_HEIGHT / 2 for y in ys))
+
+    def test_x_position_is_time_proportional_not_index_based(self):
+        result = appmod._sparkline_svg([(0, 100), (29, 200)], window_days=30)
+        first_x = float(result["points"].split(" ")[0].split(",")[0])
+        second_x = float(result["points"].split(" ")[1].split(",")[0])
+        self.assertAlmostEqual(first_x, appmod.SPARKLINE_PAD, places=1)
+        self.assertAlmostEqual(second_x, appmod.SPARKLINE_WIDTH - appmod.SPARKLINE_PAD, places=1)
 
 
 class AuthGateTests(FoodTrackerTestCase):
