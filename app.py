@@ -1,3 +1,4 @@
+import base64
 import os
 import re
 import secrets
@@ -12,7 +13,16 @@ from config import load_env_file
 
 load_env_file()
 
-AUTH_PASSWORD_HASH = os.environ.get("AUTH_PASSWORD_HASH")
+# AUTH_PASSWORD_HASH is stored base64-encoded, not as the raw
+# scrypt:.../pbkdf2:... string. cPanel's Setup Python App env-var pipeline
+# was found to corrupt the raw form -- something in it shell-interpolates
+# $salt$hash as variable references, silently dropping everything between
+# the $ delimiters. Base64's alphabet has no $, so nothing to misinterpret.
+# Decoding here means everything downstream still sees the real hash string.
+_auth_hash_b64 = os.environ.get("AUTH_PASSWORD_HASH")
+AUTH_PASSWORD_HASH = (
+    base64.urlsafe_b64decode(_auth_hash_b64).decode() if _auth_hash_b64 else None
+)
 
 RECENT_OPTIONS_LIMIT = 3
 RECENT_MEAL_MIN_DAYS = 7
