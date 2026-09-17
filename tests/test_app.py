@@ -1185,18 +1185,36 @@ class SparklineHelperTests(unittest.TestCase):
         self.assertEqual(result["min"], 100)
         self.assertEqual(result["max"], 200)
         self.assertEqual(result["latest"], 200)
+        # no min_range given -> axis matches the actual data extremes exactly
+        self.assertEqual(result["axis_min"], 100)
+        self.assertEqual(result["axis_max"], 200)
 
     def test_flat_data_centers_vertically(self):
         result = appmod._sparkline_svg([(0, 150), (10, 150), (29, 150)], window_days=30)
         ys = [float(pair.split(",")[1]) for pair in result["points"].split(" ")]
-        self.assertTrue(all(y == appmod.SPARKLINE_HEIGHT / 2 for y in ys))
+        expected_mid = (result["plot_top"] + result["plot_bottom"]) / 2
+        self.assertTrue(all(y == expected_mid for y in ys))
 
     def test_x_position_is_time_proportional_not_index_based(self):
         result = appmod._sparkline_svg([(0, 100), (29, 200)], window_days=30)
         first_x = float(result["points"].split(" ")[0].split(",")[0])
         second_x = float(result["points"].split(" ")[1].split(",")[0])
-        self.assertAlmostEqual(first_x, appmod.SPARKLINE_PAD, places=1)
-        self.assertAlmostEqual(second_x, appmod.SPARKLINE_WIDTH - appmod.SPARKLINE_PAD, places=1)
+        self.assertAlmostEqual(first_x, result["plot_left"], places=1)
+        self.assertAlmostEqual(second_x, result["plot_right"], places=1)
+
+    def test_min_range_pads_a_tight_cluster_symmetrically(self):
+        # Mirrors the user's own example: data 230-235 (span 5, midpoint
+        # 232.5) padded to a 15-wide axis -> 225-240, same midpoint.
+        result = appmod._sparkline_svg([(0, 230), (29, 235)], window_days=30, min_range=15)
+        self.assertEqual(result["min"], 230)
+        self.assertEqual(result["max"], 235)
+        self.assertEqual(result["axis_min"], 225)
+        self.assertEqual(result["axis_max"], 240)
+
+    def test_min_range_does_not_shrink_an_already_wider_span(self):
+        result = appmod._sparkline_svg([(0, 100), (29, 200)], window_days=30, min_range=15)
+        self.assertEqual(result["axis_min"], 100)
+        self.assertEqual(result["axis_max"], 200)
 
 
 class AuthGateTests(FoodTrackerTestCase):

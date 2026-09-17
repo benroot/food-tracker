@@ -1,5 +1,18 @@
 {% extends "base.html" %}
 {% block title %}Trends{% endblock %}
+
+{% macro sparkline_chart(spark, x_start_label, x_end_label) %}
+  <svg class="sparkline" viewBox="0 0 {{ spark.width }} {{ spark.height }}" aria-hidden="true">
+    <line class="sparkline-axis" x1="{{ spark.plot_left }}" y1="{{ spark.plot_top }}" x2="{{ spark.plot_left }}" y2="{{ spark.plot_bottom }}" />
+    <line class="sparkline-axis" x1="{{ spark.plot_left }}" y1="{{ spark.plot_bottom }}" x2="{{ spark.plot_right }}" y2="{{ spark.plot_bottom }}" />
+    <text class="sparkline-label" x="{{ spark.plot_left - 4 }}" y="{{ spark.plot_top + 6 }}" text-anchor="end">{{ spark.axis_max_label }}</text>
+    <text class="sparkline-label" x="{{ spark.plot_left - 4 }}" y="{{ spark.plot_bottom }}" text-anchor="end">{{ spark.axis_min_label }}</text>
+    <text class="sparkline-label" x="{{ spark.plot_left }}" y="{{ spark.plot_bottom + 12 }}" text-anchor="start">{{ x_start_label }}</text>
+    <text class="sparkline-label" x="{{ spark.plot_right }}" y="{{ spark.plot_bottom + 12 }}" text-anchor="end">{{ x_end_label }}</text>
+    <polyline points="{{ spark.points }}" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />
+  </svg>
+{% endmacro %}
+
 {% block content %}
   <h1>Trends</h1>
   <p>Last {{ window_days }} days.</p>
@@ -7,9 +20,7 @@
   <section class="sparkline-section" aria-label="Weight trend">
     <h2>Weight</h2>
     {% if weight_sparkline %}
-      <svg class="sparkline" viewBox="0 0 {{ weight_sparkline.width }} {{ weight_sparkline.height }}" aria-hidden="true">
-        <polyline points="{{ weight_sparkline.points }}" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />
-      </svg>
+      {{ sparkline_chart(weight_sparkline, x_axis_start_label, x_axis_end_label) }}
       <p class="sparkline-caption">{{ weight_caption }}</p>
     {% else %}
       <p>No weight logged in the last {{ window_days }} days.</p>
@@ -19,9 +30,7 @@
   <section class="sparkline-section" aria-label="Calorie trend">
     <h2>Calories</h2>
     {% if calorie_sparkline %}
-      <svg class="sparkline" viewBox="0 0 {{ calorie_sparkline.width }} {{ calorie_sparkline.height }}" aria-hidden="true">
-        <polyline points="{{ calorie_sparkline.points }}" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />
-      </svg>
+      {{ sparkline_chart(calorie_sparkline, x_axis_start_label, x_axis_end_label) }}
       <p class="sparkline-caption">{{ calorie_caption }}</p>
     {% else %}
       <p>No calories logged in the last {{ window_days }} days.</p>

@@ -197,8 +197,12 @@ def _daily_food_trends(db, window_days=TRENDS_WINDOW_DAYS):
 
 
 SPARKLINE_WIDTH = 280
-SPARKLINE_HEIGHT = 56
-SPARKLINE_PAD = 4
+SPARKLINE_HEIGHT = 90
+SPARKLINE_MARGIN_LEFT = 32
+SPARKLINE_MARGIN_RIGHT = 4
+SPARKLINE_MARGIN_TOP = 8
+SPARKLINE_MARGIN_BOTTOM = 16
+WEIGHT_MIN_AXIS_RANGE = 15
 
 
 def _weight_trend(db, window_days=TRENDS_WINDOW_DAYS):
@@ -229,29 +233,57 @@ def _calorie_trend(db, window_days=TRENDS_WINDOW_DAYS):
     return [(offset, day["total_calories"]) for offset, day in enumerate(chronological)]
 
 
-def _sparkline_svg(points, window_days, width=SPARKLINE_WIDTH, height=SPARKLINE_HEIGHT, pad=SPARKLINE_PAD):
-    """Turn (day_offset, value) points into SVG polyline coordinates. Y is
-    tight-fit to the data's own min/max, not zero-anchored -- standard
-    sparkline convention, needed so a few lbs or a few hundred calories of
-    day-to-day variation still reads as visible movement instead of a flat
-    line. X is proportional to day_offset (not list position), so real time
-    gaps in sparse data (e.g. weight) show up as stretched flat segments
-    rather than being compressed away. Returns None if there's nothing to
-    plot at all."""
+def _sparkline_svg(
+    points,
+    window_days,
+    min_range=None,
+    width=SPARKLINE_WIDTH,
+    height=SPARKLINE_HEIGHT,
+    margin_left=SPARKLINE_MARGIN_LEFT,
+    margin_right=SPARKLINE_MARGIN_RIGHT,
+    margin_top=SPARKLINE_MARGIN_TOP,
+    margin_bottom=SPARKLINE_MARGIN_BOTTOM,
+):
+    """Turn (day_offset, value) points into SVG polyline coordinates plus a
+    simple axis (a vertical + horizontal line; labels are the caller's job).
+    Y is tight-fit to the data's own min/max by default, not zero-anchored --
+    standard sparkline convention, needed so a few lbs or a few hundred
+    calories of day-to-day variation still reads as visible movement instead
+    of a flat line. min_range optionally floors that span, padded
+    symmetrically around the data's own midpoint (e.g. weight: a 230-235 lb
+    cluster gets padded to 225-240 rather than being stretched to fill the
+    full height and look more dramatic than it is). X is proportional to
+    day_offset (not list position), so real time gaps in sparse data (e.g.
+    weight) show up as stretched flat segments rather than being compressed
+    away. Returns None if there's nothing to plot at all.
+
+    "min"/"max" in the result are the actual data's extremes (for a caption
+    describing what really happened); "axis_min"/"axis_max" are the
+    (possibly min_range-padded) bounds the y-axis and its labels actually
+    use -- these two can differ when min_range pads a tight cluster."""
     if not points:
         return None
     values = [v for _, v in points]
     lo, hi = min(values), max(values)
-    span = hi - lo
+    axis_lo, axis_hi = lo, hi
+    if min_range is not None and (hi - lo) < min_range:
+        mid = (hi + lo) / 2
+        axis_lo, axis_hi = mid - min_range / 2, mid + min_range / 2
+    axis_span = axis_hi - axis_lo
+
     denom = max(window_days - 1, 1)
+    plot_left, plot_right = margin_left, width - margin_right
+    plot_top, plot_bottom = margin_top, height - margin_bottom
+    plot_width = plot_right - plot_left
+    plot_height = plot_bottom - plot_top
 
     def x_at(offset):
-        return pad + (width - 2 * pad) * offset / denom
+        return plot_left + plot_width * offset / denom
 
     def y_at(v):
-        if span == 0:
-            return height / 2
-        return pad + (height - 2 * pad) * (1 - (v - lo) / span)
+        if axis_span == 0:
+            return plot_top + plot_height / 2
+        return plot_top + plot_height * (1 - (v - axis_lo) / axis_span)
 
     coords = " ".join(f"{x_at(offset):.1f},{y_at(v):.1f}" for offset, v in points)
     return {
@@ -261,6 +293,12 @@ def _sparkline_svg(points, window_days, width=SPARKLINE_WIDTH, height=SPARKLINE_
         "min": lo,
         "max": hi,
         "latest": points[-1][1],
+        "axis_min": axis_lo,
+        "axis_max": axis_hi,
+        "plot_left": plot_left,
+        "plot_right": plot_right,
+        "plot_top": plot_top,
+        "plot_bottom": plot_bottom,
     }
 
 
@@ -562,10 +600,16 @@ def _describe_logged_item(item):
 def trends_page():
     db = dbmod.get_db()
 
+    window_start = date.today() - timedelta(days=TRENDS_WINDOW_DAYS - 1)
+    x_axis_start_label = f"{window_start.month}/{window_start.day}"
+    x_axis_end_label = f"{date.today().month}/{date.today().day}"
+
     weight_points = _weight_trend(db)
-    weight_sparkline = _sparkline_svg(weight_points, TRENDS_WINDOW_DAYS)
+    weight_sparkline = _sparkline_svg(weight_points, TRENDS_WINDOW_DAYS, min_range=WEIGHT_MIN_AXIS_RANGE)
     weight_caption = None
     if weight_sparkline:
+        weight_sparkline["axis_min_label"] = f'{weight_sparkline["axis_min"]:g}'
+        weight_sparkline["axis_max_label"] = f'{weight_sparkline["axis_max"]:g}'
         latest_offset, latest_value = weight_points[-1]
         latest_date = date.today() - timedelta(days=TRENDS_WINDOW_DAYS - 1 - latest_offset)
         when = "" if latest_date == date.today() else f" on {latest_date.isoformat()}"
@@ -578,6 +622,8 @@ def trends_page():
     calorie_sparkline = _sparkline_svg(calorie_points, TRENDS_WINDOW_DAYS)
     calorie_caption = None
     if calorie_sparkline:
+        calorie_sparkline["axis_min_label"] = f'{calorie_sparkline["axis_min"]:g}'
+        calorie_sparkline["axis_max_label"] = f'{calorie_sparkline["axis_max"]:g}'
         calorie_caption = (
             f'{calorie_sparkline["latest"]} cal today · '
             f'range {calorie_sparkline["min"]}–{calorie_sparkline["max"]}'
@@ -586,6 +632,8 @@ def trends_page():
     return render_template(
         "trends.html",
         window_days=TRENDS_WINDOW_DAYS,
+        x_axis_start_label=x_axis_start_label,
+        x_axis_end_label=x_axis_end_label,
         weight_sparkline=weight_sparkline,
         weight_caption=weight_caption,
         calorie_sparkline=calorie_sparkline,

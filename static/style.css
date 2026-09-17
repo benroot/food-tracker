@@ -277,6 +277,16 @@ nav a:focus-visible {
   color: var(--accent);
 }
 
+.sparkline-axis {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.sparkline-label {
+  fill: #666;
+  font-size: 9px;
+}
+
 .sparkline-caption {
   margin-top: 0.25rem;
   color: #444;
