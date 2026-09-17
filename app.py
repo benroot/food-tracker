@@ -1,14 +1,18 @@
+import os
 import re
 import secrets
 from datetime import date, datetime, timedelta
 
-from flask import Flask, flash, redirect, render_template, request, session, url_for
+from flask import Flask, Response, flash, redirect, render_template, request, session, url_for
+from werkzeug.security import check_password_hash
 
 import claude_client
 import db as dbmod
 from config import load_env_file
 
 load_env_file()
+
+AUTH_PASSWORD_HASH = os.environ.get("AUTH_PASSWORD_HASH")
 
 RECENT_OPTIONS_LIMIT = 3
 RECENT_MEAL_MIN_DAYS = 7
@@ -187,6 +191,23 @@ app.secret_key = secrets.token_hex(32)
 
 app.teardown_appcontext(dbmod.close_db)
 dbmod.init_db()
+
+
+@app.before_request
+def _require_auth():
+    # AUTH_PASSWORD_HASH unset (e.g. local dev, or the test suite, which never
+    # sets it) means the gate is off -- consistent with how ANTHROPIC_API_KEY
+    # is mocked away rather than required in tests. Production must set it.
+    if not AUTH_PASSWORD_HASH:
+        return None
+    auth = request.authorization
+    if auth is None or not check_password_hash(AUTH_PASSWORD_HASH, auth.password):
+        return Response(
+            "Authentication required.",
+            401,
+            {"WWW-Authenticate": 'Basic realm="Food Tracker"'},
+        )
+    return None
 
 
 @app.route("/weight", methods=["GET"])

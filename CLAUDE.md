@@ -37,12 +37,23 @@ Design phase complete (architecture, schema, model approach, hosting, and deploy
 
 **WSGI entry point**: `passenger_wsgi.py` lives in the project root, alongside the Flask app code, and **is committed to git** (unlike `.env` — it contains no secrets, just the import wiring Passenger needs to find the Flask `app` object under the variable name `application`).
 
-**Environment variables / secrets**: cPanel's "Setup Python App" page has its own environment-variable section — this is the source of truth for `ANTHROPIC_API_KEY` in production, not a `.env` file (some Passenger setups don't reliably auto-load `.env` the way local dev does with `python-dotenv`). Verify directly once deployed rather than assuming parity with local behavior.
+**Environment variables / secrets**: cPanel's "Setup Python App" page has its own environment-variable section — this is the source of truth for `ANTHROPIC_API_KEY` (and `AUTH_PASSWORD_HASH`, see Authentication below) in production, not a `.env` file (some Passenger setups don't reliably auto-load `.env` the way local dev does with `python-dotenv`). Verify directly once deployed rather than assuming parity with local behavior.
 
 **Version control & deploys**:
 - Git is used for real version history and rollback safety, regardless of deployment mechanism.
 - Deploy process is intentionally manual and lightweight: SSH or cPanel Terminal → `git pull` → click "Restart" on the Python App page. No CI/CD pipeline — deliberately avoided as unnecessary complexity (deploy keys, secrets on a third-party service, a pipeline to debug) for a single-user app deployed occasionally, by hand, on purpose.
 - If the cPanel account has SSH/Terminal access, use that directly for `git pull`. If not, check for cPanel's built-in "Git Version Control" tool, which supports cloning/pulling without shell access.
+
+---
+
+## Authentication
+
+Single-user app, so this is deliberately not a user-management system: a single password gate via **HTTP Basic Auth**, checked in a global `before_request` hook in `app.py` against `AUTH_PASSWORD_HASH`. No username is checked (Basic Auth requires one be sent, but the app ignores it) and no session/cookie state is involved — the browser caches the credential per origin and resends it automatically, so there's no explicit login page or logout button. This was chosen over a session-based login form specifically to avoid touching `app.secret_key` (currently regenerated on every process boot, so a session-based approach would mean re-authenticating after every deploy restart unless that were also fixed) and to avoid adding a login template/route for a single-user tool.
+
+- **`AUTH_PASSWORD_HASH`**: a Werkzeug `generate_password_hash` value (PBKDF2/scrypt, not the plaintext password), set via `.env` locally and cPanel's environment-variable UI in production — same treatment as `ANTHROPIC_API_KEY`.
+- **If `AUTH_PASSWORD_HASH` is unset, the gate is a no-op** and every route is open. This is deliberate, not an oversight: it means local dev and the automated test suite (which never sets it, same as it never sets a real `ANTHROPIC_API_KEY`) don't need real credentials to run. The direct consequence is that **production must have `AUTH_PASSWORD_HASH` set** or the app is silently unprotected — worth double-checking after the initial deploy of this feature.
+- **`generate_password_hash.py`** (project root, run locally only — `python generate_password_hash.py`): prompts twice via `getpass` (never echoed, never touches shell history) and prints the hash to paste into `.env` / cPanel's UI. Re-run any time the password should change; there's no in-app way to change it.
+- **Depends on HTTPS already being in place** (confirmed already true for this app's cPanel host) — Basic Auth sends the password on every request, base64-encoded but not encrypted on its own, so this only meaningfully protects anything over an HTTPS connection.
 
 ---
 

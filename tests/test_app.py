@@ -5,6 +5,8 @@ import unittest
 from datetime import date, timedelta
 from unittest.mock import patch
 
+from werkzeug.security import generate_password_hash
+
 _db_fd, _db_path = tempfile.mkstemp(suffix=".db")
 os.close(_db_fd)
 os.environ["FOOD_LOG_DB_PATH"] = _db_path
@@ -1091,6 +1093,34 @@ class TrendsRouteTests(FoodTrackerTestCase):
         self.assertNotIn(too_old, dates)
         boundary_row = next(d for d in days if d["entry_date"] == boundary)
         self.assertEqual(boundary_row["total_calories"], 50)
+
+
+class AuthGateTests(FoodTrackerTestCase):
+    """AUTH_PASSWORD_HASH is unset throughout the rest of the suite (same
+    treatment as ANTHROPIC_API_KEY -- never configured in tests), which is
+    itself what test_no_hash_configured_leaves_routes_open below asserts."""
+
+    TEST_HASH = generate_password_hash("correct-horse")
+
+    def test_no_hash_configured_leaves_routes_open(self):
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 200)
+
+    def test_missing_credentials_are_rejected_when_hash_is_configured(self):
+        with patch.object(appmod, "AUTH_PASSWORD_HASH", self.TEST_HASH):
+            response = self.client.get("/")
+        self.assertEqual(response.status_code, 401)
+        self.assertIn("WWW-Authenticate", response.headers)
+
+    def test_wrong_password_is_rejected(self):
+        with patch.object(appmod, "AUTH_PASSWORD_HASH", self.TEST_HASH):
+            response = self.client.get("/", auth=("anyuser", "wrong-password"))
+        self.assertEqual(response.status_code, 401)
+
+    def test_correct_password_is_accepted_regardless_of_username(self):
+        with patch.object(appmod, "AUTH_PASSWORD_HASH", self.TEST_HASH):
+            response = self.client.get("/", auth=("anyuser", "correct-horse"))
+        self.assertEqual(response.status_code, 200)
 
 
 if __name__ == "__main__":
