@@ -16,10 +16,14 @@ delimiters. Base64's alphabet has no $, so there's nothing left to mangle.
 app.py decodes it back on read, so nothing downstream needs to know about
 this -- it's purely a storage-transport workaround for cPanel's env vars.
 
-Uses Werkzeug's scrypt default (rather than pbkdf2:sha256) -- scrypt is the
-stronger, more modern choice, and the base64 wrapping above already fixes the
-actual corruption bug regardless of which hash method's output it's wrapping,
-so there's no more reason to trade it away for a shorter raw string.
+Uses pbkdf2:sha256, not Werkzeug's scrypt default -- scrypt needs OpenSSL
+1.1+ built with scrypt support, which production's Python 3.8.20 build on
+the cPanel host doesn't have (AttributeError: module 'hashlib' has no
+attribute 'scrypt', surfaced at verification time, i.e. on every login
+attempt). pbkdf2_hmac has no such dependency -- pure HMAC, always available
+in hashlib -- so this is a hosting-compatibility requirement, not a
+preference. Don't switch this back to scrypt without confirming production's
+Python build actually supports it.
 """
 import base64
 import getpass
@@ -32,5 +36,5 @@ confirm = getpass.getpass("Confirm password: ")
 if password != confirm:
     print("Passwords didn't match -- nothing generated.")
 else:
-    hash_value = generate_password_hash(password)
+    hash_value = generate_password_hash(password, method="pbkdf2:sha256")
     print(base64.urlsafe_b64encode(hash_value.encode()).decode())
