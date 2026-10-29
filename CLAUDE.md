@@ -85,10 +85,11 @@ Forced tool call pattern — the backend never parses free-text JSON from a prom
             "food": { "type": "string" },
             "quantity": { "type": "string" },
             "estimated_calories": { "type": "integer" },
+            "estimated_fiber_grams": { "type": "integer" },
             "is_estimate": { "type": "boolean" },
             "assumption_note": { "type": "string" }
           },
-          "required": ["food", "estimated_calories", "is_estimate"]
+          "required": ["food", "estimated_calories", "estimated_fiber_grams", "is_estimate"]
         }
       },
       "needs_clarification": { "type": "boolean" },
@@ -100,6 +101,10 @@ Forced tool call pattern — the backend never parses free-text JSON from a prom
 ```
 
 When `needs_clarification` is true, the backend should ask the follow-up question and hold off writing to the database until resolved — never guess silently on a genuinely ambiguous entry.
+
+(The real schema in `claude_client.py` also has an optional top-level `entry_time`, plus `description` hints on some fields.)
+
+**Dietary fiber**: tracked per item alongside calories, as whole grams (`estimated_fiber_grams` → `log_entry_items.fiber_grams`). The system prompt asks for fiber explicitly (0 for foods with essentially none) and sums it along with calories when several ingredients are combined into one dish. The field is required in the schema, but `app.py` reads it with `.get()`, so a missing estimate is stored as unknown rather than failing the whole log. **NULL means unknown, and is deliberately distinct from 0**: rows logged before fiber tracking existed, and direct-entry or edit submissions with the optional fiber field left blank, store NULL and display as `— fiber`. Old entries were never backfilled. Daily totals on the food page count unknown as 0. Repeat copies the stored value, NULL included. A repeat option shows a fiber total only if at least one of its items has known fiber. No daily fiber goal is shown, which was an explicit decision; easy to add later.
 
 **Model choice**: no need for the most expensive tier for straightforward single-item entries; more complex multi-item meals benefit from stronger nutrition reasoning. At single-user volume, cost difference between tiers is negligible either way — simplicity (one model throughout) is a reasonable default unless quality issues show up in practice.
 
@@ -157,7 +162,8 @@ CREATE TABLE log_entry_items (
     quantity TEXT,
     calories INTEGER NOT NULL,
     is_estimate INTEGER NOT NULL DEFAULT 0,
-    assumption_note TEXT
+    assumption_note TEXT,
+    fiber_grams INTEGER  -- whole grams; NULL = unknown, not 0 (see Parsing Tool Schema)
 );
 
 CREATE TABLE weight_log (
@@ -216,7 +222,7 @@ Flow:
 - SQLite file for local data — no external services required to develop or test.
 - Local dev server + browser at localhost; manually test by sending a food message through the chat UI and confirming the row lands correctly in the SQLite file (inspectable with a tool like DB Browser for SQLite).
 - Automated tests never call the live Claude API — see Testing Strategy below.
-- **Schema migrations are self-applying, not a manual deploy step.** `db.py`'s `init_db()` already runs unconditionally on every app boot (this is what creates `food_log.db` on a fresh install — see the Passenger import behavior this was built around). It also runs a small `_migrate_schema()` check for any schema changes made after initial deploy that `CREATE TABLE IF NOT EXISTS` can't retroactively apply to an existing database (e.g. dropping the `meal_type` column). Each check is a no-op once already applied, so it's safe to leave permanently and safe across multiple Passenger workers booting concurrently. This means a schema change ships the same way every other change does: `git pull` → Restart, nothing extra to remember.
+- **Schema migrations are self-applying, not a manual deploy step.** `db.py`'s `init_db()` already runs unconditionally on every app boot (this is what creates `food_log.db` on a fresh install — see the Passenger import behavior this was built around). It also runs a small `_migrate_schema()` check for any schema changes made after initial deploy that `CREATE TABLE IF NOT EXISTS` can't retroactively apply to an existing database (e.g. dropping the `meal_type` column, adding `log_entry_items.fiber_grams`). Each check is a no-op once already applied, so it's safe to leave permanently and safe across multiple Passenger workers booting concurrently. This means a schema change ships the same way every other change does: `git pull` → Restart, nothing extra to remember.
 
 ---
 
@@ -330,6 +336,8 @@ A new `/trends` page summarizing trends over time rather than only ever showing 
 - No new tables, columns, or indexes — same reasoning as the first slice, this is still well within what a live query can compute instantly at single-user scale.
 
 **Refined after the fact**: these aren't pure sparklines anymore — each chart got a minimal axis (a vertical + horizontal line, with min/max value labels on the y-axis and window start/end date labels on the x-axis), since a bare shape with no orientation at all turned out to be too little context. Still no gridlines or in-between tick marks, and still no charting library — `_sparkline_svg()` computes the axis line/label positions the same way it computes the polyline, just with real margins (`SPARKLINE_MARGIN_*`) reserved for the label text instead of a single uniform pad. Weight's y-axis also got a floor: `min_range` (`WEIGHT_MIN_AXIS_RANGE = 15`, i.e. 15 lbs) pads the axis symmetrically around the data's own midpoint whenever the actual span is tighter than that, so a stable weight (e.g. a real 230–235 lb range) doesn't get stretched to fill the full chart height and look more dramatic than it is — the axis shows the padded range (e.g. 225–240), while the caption below it still states the real measured min/max, so nothing about what actually happened is obscured by the padding. Calories has no such floor (its natural range is usually already wide) but the parameter is generic on `_sparkline_svg()` if that changes later.
+
+**Third slice, built: fiber.** A fiber sparkline below calories, using the same `_sparkline_svg()` with a tight-fit axis and no `min_range`. `_fiber_trend()` is **sparse like weight, not zero-filled like calories**: a day is plotted only if at least one of its items has known (non-NULL) fiber. Without that rule, every day logged before fiber tracking existed, and every day with nothing logged, would plot as a misleading 0 g. Unknown items on a plotted day still count as 0, matching the food page's daily total. The caption names the date when the latest plotted day isn't today, as weight's does.
 
 Exercise calories burned and net calories per day are still not on this page — remain a planned future addition to the same `/trends` route.
 *Usable for*: an at-a-glance shape of weight and calorie trends over the last month, including whether logging has gaps (a long flat/sloped weight segment, or a food day sitting at the very bottom of its own range, both read as "nothing logged that day"). The fuller trend/dashboard value (exercise, net calories, selectable ranges) arrives in later iterations of this same page.

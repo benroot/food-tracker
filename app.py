@@ -58,6 +58,31 @@ def _resolve_entry_date(raw_offset):
     return date.today() + timedelta(days=offset)
 
 
+def _format_fiber(grams):
+    """'4 g fiber', or '— fiber' when unknown (NULL: logged before fiber
+    tracking existed, or left blank on direct entry). 0 g is a real value
+    and is shown as such."""
+    return "— fiber" if grams is None else f"{grams} g fiber"
+
+
+def _parse_optional_fiber(raw):
+    """Fiber form field: blank means unknown (None). Returns (value, ok)."""
+    raw = (raw or "").strip()
+    if not raw:
+        return None, True
+    try:
+        value = int(raw)
+    except ValueError:
+        return None, False
+    return (value, True) if value >= 0 else (None, False)
+
+
+def _describe_item(description, calories, fiber_grams):
+    if fiber_grams is None:
+        return f"{description} ({calories} cal)"
+    return f"{description} ({calories} cal, {fiber_grams} g fiber)"
+
+
 def _recent_meal_options(db, min_days=RECENT_MEAL_MIN_DAYS, min_count=RECENT_MEAL_MIN_COUNT):
     """Recent meals to offer for repeating: a flat, reverse-chronological
     list (no more meal-type grouping -- that concept is gone). Covers at
@@ -75,7 +100,7 @@ def _recent_meal_options(db, min_days=RECENT_MEAL_MIN_DAYS, min_count=RECENT_MEA
     rows = db.execute(
         """
         SELECT le.id AS entry_id, le.entry_date, le.entry_time,
-               lei.description, lei.calories
+               lei.description, lei.calories, lei.fiber_grams
         FROM log_entries le
         JOIN log_entry_items lei ON lei.log_entry_id = le.id
         WHERE le.id IN (
@@ -100,11 +125,15 @@ def _recent_meal_options(db, min_days=RECENT_MEAL_MIN_DAYS, min_count=RECENT_MEA
                 "entry_time": row["entry_time"],
                 "items": [],
                 "total_calories": 0,
+                # Stays None (not shown) unless at least one item's fiber is known.
+                "total_fiber": None,
             }
             by_entry_id[entry_id] = option
             options.append(option)
         option["items"].append(row["description"])
         option["total_calories"] += row["calories"]
+        if row["fiber_grams"] is not None:
+            option["total_fiber"] = (option["total_fiber"] or 0) + row["fiber_grams"]
     return options
 
 
@@ -135,7 +164,7 @@ def _food_day_summary(db, day, label):
     entries = db.execute(
         """
         SELECT lei.id AS item_id, le.entry_time,
-               lei.description, lei.quantity, lei.calories,
+               lei.description, lei.quantity, lei.calories, lei.fiber_grams,
                lei.is_estimate, lei.assumption_note
         FROM log_entries le
         JOIN log_entry_items lei ON lei.log_entry_id = le.id
@@ -145,6 +174,8 @@ def _food_day_summary(db, day, label):
         (day.isoformat(),),
     ).fetchall()
     total_calories = sum(entry["calories"] for entry in entries)
+    # Unknown-fiber items count as 0 toward the day's total.
+    total_fiber = sum(entry["fiber_grams"] or 0 for entry in entries)
     calories_burned = db.execute(
         "SELECT COALESCE(SUM(calories_burned), 0) FROM exercise_log WHERE entry_date = ?",
         (day.isoformat(),),
@@ -153,6 +184,7 @@ def _food_day_summary(db, day, label):
         "label": label,
         "entries": entries,
         "total_calories": total_calories,
+        "total_fiber": total_fiber,
         "calories_burned": calories_burned,
         "net_calories": total_calories - calories_burned,
     }
@@ -245,6 +277,32 @@ def _calorie_trend(db, window_days=TRENDS_WINDOW_DAYS):
     list, just reordered and re-indexed for sparkline plotting."""
     chronological = list(reversed(_daily_food_trends(db, window_days=window_days)))
     return [(offset, day["total_calories"]) for offset, day in enumerate(chronological)]
+
+
+def _fiber_trend(db, window_days=TRENDS_WINDOW_DAYS):
+    """Total fiber per day as (day_offset, fiber_grams) pairs, oldest first.
+    Unlike calories, NOT zero-filled: only days with at least one known
+    fiber value are plotted (same sparse treatment as weight). Otherwise every
+    day logged before fiber tracking existed -- and any day with nothing
+    logged -- would plot as a misleading 0 g. Unknown items on an otherwise
+    plotted day still count as 0, matching the food page's daily total."""
+    window_start = date.today() - timedelta(days=window_days - 1)
+    rows = db.execute(
+        """
+        SELECT le.entry_date, SUM(lei.fiber_grams) AS total_fiber
+        FROM log_entries le
+        JOIN log_entry_items lei ON lei.log_entry_id = le.id
+        WHERE le.entry_date >= ?
+        GROUP BY le.entry_date
+        HAVING COUNT(lei.fiber_grams) > 0
+        ORDER BY le.entry_date ASC
+        """,
+        (window_start.isoformat(),),
+    ).fetchall()
+    return [
+        ((date.fromisoformat(row["entry_date"]) - window_start).days, row["total_fiber"])
+        for row in rows
+    ]
 
 
 def _sparkline_svg(
@@ -342,6 +400,7 @@ def _csrf_token():
 
 
 app.jinja_env.globals["csrf_token"] = _csrf_token
+app.jinja_env.filters["fiber"] = _format_fiber
 
 
 @app.context_processor
@@ -701,7 +760,9 @@ def food_page():
 
 
 def _describe_logged_item(item):
-    description = f'{item["food"]} ({item["estimated_calories"]} cal)'
+    description = _describe_item(
+        item["food"], item["estimated_calories"], item.get("estimated_fiber_grams")
+    )
     if item.get("assumption_note"):
         description += f' -- {item["assumption_note"]}'
     return description
@@ -740,6 +801,20 @@ def trends_page():
             f'range {calorie_sparkline["min"]}–{calorie_sparkline["max"]}'
         )
 
+    fiber_points = _fiber_trend(db)
+    fiber_sparkline = _sparkline_svg(fiber_points, TRENDS_WINDOW_DAYS)
+    fiber_caption = None
+    if fiber_sparkline:
+        fiber_sparkline["axis_min_label"] = f'{fiber_sparkline["axis_min"]:g}'
+        fiber_sparkline["axis_max_label"] = f'{fiber_sparkline["axis_max"]:g}'
+        latest_offset, latest_value = fiber_points[-1]
+        latest_date = date.today() - timedelta(days=TRENDS_WINDOW_DAYS - 1 - latest_offset)
+        when = "today" if latest_date == date.today() else f"on {latest_date.isoformat()}"
+        fiber_caption = (
+            f'{latest_value} g {when} · '
+            f'range {fiber_sparkline["min"]}–{fiber_sparkline["max"]}'
+        )
+
     return render_template(
         "trends.html",
         window_days=TRENDS_WINDOW_DAYS,
@@ -749,6 +824,8 @@ def trends_page():
         weight_caption=weight_caption,
         calorie_sparkline=calorie_sparkline,
         calorie_caption=calorie_caption,
+        fiber_sparkline=fiber_sparkline,
+        fiber_caption=fiber_caption,
     )
 
 
@@ -791,14 +868,18 @@ def food_log():
         db.execute(
             """
             INSERT INTO log_entry_items
-                (log_entry_id, description, quantity, calories, is_estimate, assumption_note)
-            VALUES (?, ?, ?, ?, ?, ?)
+                (log_entry_id, description, quantity, calories, fiber_grams,
+                 is_estimate, assumption_note)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 log_entry_id,
                 item["food"],
                 item.get("quantity"),
                 item["estimated_calories"],
+                # .get: a missing fiber estimate is stored as unknown rather
+                # than failing the whole log.
+                item.get("estimated_fiber_grams"),
                 1 if item["is_estimate"] else 0,
                 item.get("assumption_note"),
             ),
@@ -829,6 +910,11 @@ def food_log_direct():
         flash("Calories must be a whole number greater than 0.", "error")
         return redirect(url_for("food_page"))
 
+    fiber, fiber_ok = _parse_optional_fiber(request.form.get("fiber"))
+    if not fiber_ok:
+        flash("Fiber must be a whole number of grams (0 or more), or left blank.", "error")
+        return redirect(url_for("food_page"))
+
     db = dbmod.get_db()
     now = datetime.now()
     entry_date = _resolve_entry_date(request.form.get("entry_date_offset"))
@@ -839,14 +925,14 @@ def food_log_direct():
     db.execute(
         """
         INSERT INTO log_entry_items
-            (log_entry_id, description, calories, is_estimate)
-        VALUES (?, ?, ?, 0)
+            (log_entry_id, description, calories, fiber_grams, is_estimate)
+        VALUES (?, ?, ?, ?, 0)
         """,
-        (cursor.lastrowid, food, calories),
+        (cursor.lastrowid, food, calories, fiber),
     )
     db.commit()
 
-    flash(f"Logged: {food} ({calories} cal)", "success")
+    flash(f"Logged: {_describe_item(food, calories, fiber)}", "success")
     return redirect(url_for("food_page"))
 
 
@@ -861,7 +947,7 @@ def food_repeat():
     db = dbmod.get_db()
     source_items = db.execute(
         """
-        SELECT description, quantity, calories, is_estimate, assumption_note
+        SELECT description, quantity, calories, fiber_grams, is_estimate, assumption_note
         FROM log_entry_items WHERE log_entry_id = ?
         """,
         (entry_id,),
@@ -883,21 +969,26 @@ def food_repeat():
         db.execute(
             """
             INSERT INTO log_entry_items
-                (log_entry_id, description, quantity, calories, is_estimate, assumption_note)
-            VALUES (?, ?, ?, ?, ?, ?)
+                (log_entry_id, description, quantity, calories, fiber_grams,
+                 is_estimate, assumption_note)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 new_entry_id,
                 item["description"],
                 item["quantity"],
                 item["calories"],
+                item["fiber_grams"],
                 item["is_estimate"],
                 item["assumption_note"],
             ),
         )
     db.commit()
 
-    summary = ", ".join(f'{item["description"]} ({item["calories"]} cal)' for item in source_items)
+    summary = ", ".join(
+        _describe_item(item["description"], item["calories"], item["fiber_grams"])
+        for item in source_items
+    )
     flash(f"Logged: {summary}", "success")
     return redirect(url_for("food_page"))
 
@@ -906,7 +997,7 @@ def food_repeat():
 def food_entry_edit_form(item_id):
     db = dbmod.get_db()
     entry = db.execute(
-        "SELECT id AS item_id, description, calories FROM log_entry_items WHERE id = ?",
+        "SELECT id AS item_id, description, calories, fiber_grams FROM log_entry_items WHERE id = ?",
         (item_id,),
     ).fetchone()
     if entry is None:
@@ -940,13 +1031,18 @@ def food_entry_edit(item_id):
         flash("Calories must be a whole number greater than 0.", "error")
         return redirect(url_for("food_entry_edit_form", item_id=item_id))
 
+    fiber, fiber_ok = _parse_optional_fiber(request.form.get("fiber"))
+    if not fiber_ok:
+        flash("Fiber must be a whole number of grams (0 or more), or left blank.", "error")
+        return redirect(url_for("food_entry_edit_form", item_id=item_id))
+
     db.execute(
-        "UPDATE log_entry_items SET description = ?, calories = ? WHERE id = ?",
-        (food, calories, item_id),
+        "UPDATE log_entry_items SET description = ?, calories = ?, fiber_grams = ? WHERE id = ?",
+        (food, calories, fiber, item_id),
     )
     db.commit()
 
-    flash(f"Updated: {food} ({calories} cal)", "success")
+    flash(f"Updated: {_describe_item(food, calories, fiber)}", "success")
     return redirect(url_for("food_page"))
 
 

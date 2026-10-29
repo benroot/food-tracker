@@ -220,6 +220,11 @@ nav a:focus-visible {
   color: var(--text);
 }
 
+.log-entry-fiber {
+  font-weight: 400;
+  color: #444;
+}
+
 .log-entry-description {
   margin-top: 0.25rem;
   color: var(--text);

@@ -8,7 +8,9 @@ MODEL = "claude-sonnet-5"
 
 SYSTEM_PROMPT = (
     "You parse a single-user food log message into structured entries with "
-    "estimated calories. Use your best nutrition-estimation judgment for "
+    "estimated calories and estimated dietary fiber (whole grams; 0 for "
+    "foods with essentially none, such as meat, eggs, oil, or plain "
+    "drinks). Use your best nutrition-estimation judgment for "
     "typical portion sizes when the user doesn't specify one, and mark such "
     "items as estimates with a short assumption note. When the message "
     "lists several raw ingredients that together make up one home-cooked "
@@ -16,7 +18,7 @@ SYSTEM_PROMPT = (
     "sauce, oil, or greens; preparation verbs like 'made', 'cooked', "
     "'threw together'; combining language like 'with' or 'topped with'), "
     "log them as a single item with a descriptive dish name and the summed "
-    "calories, noting the ingredient breakdown in assumption_note -- not "
+    "calories and fiber, noting the ingredient breakdown in assumption_note -- not "
     "one item per ingredient. For example, 'rice bowl with 1 cup rice, 5 "
     "oz cooked salmon, 1 tbsp oil, 1 cup cooked collard greens, 2 tbsp soy "
     "sauce' is one item ('Salmon rice bowl with collard greens'), but "
@@ -33,7 +35,7 @@ SYSTEM_PROMPT = (
 
 LOG_FOOD_ENTRY_TOOL = {
     "name": "log_food_entry",
-    "description": "Log one or more food items parsed from the user's message, with estimated calories.",
+    "description": "Log one or more food items parsed from the user's message, with estimated calories and dietary fiber.",
     "input_schema": {
         "type": "object",
         "properties": {
@@ -45,10 +47,14 @@ LOG_FOOD_ENTRY_TOOL = {
                         "food": {"type": "string"},
                         "quantity": {"type": "string"},
                         "estimated_calories": {"type": "integer"},
+                        "estimated_fiber_grams": {
+                            "type": "integer",
+                            "description": "Estimated dietary fiber in whole grams. 0 if the food has essentially none.",
+                        },
                         "is_estimate": {"type": "boolean"},
                         "assumption_note": {"type": "string"},
                     },
-                    "required": ["food", "estimated_calories", "is_estimate"],
+                    "required": ["food", "estimated_calories", "estimated_fiber_grams", "is_estimate"],
                 },
             },
             "entry_time": {

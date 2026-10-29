@@ -59,7 +59,7 @@
             {% for option in repeat_options %}
               <li>
                 <button type="submit" name="entry_id" value="{{ option['entry_id'] }}">
-                  {{ option["items"] | join(", ") }} &mdash; {{ option["total_calories"] }} cal
+                  {{ option["items"] | join(", ") }} &mdash; {{ option["total_calories"] }} cal{% if option["total_fiber"] is not none %}, {{ option["total_fiber"] }} g fiber{% endif %}
                   <span class="repeat-date">{{ option["entry_date"] }} {{ option["entry_time"] }}</span>
                 </button>
               </li>
@@ -80,6 +80,9 @@
 
         <label for="calories">Calories</label>
         <input type="number" id="calories" name="calories" min="1" step="1" required>
+
+        <label for="fiber">Fiber in grams (optional)</label>
+        <input type="number" id="fiber" name="fiber" min="0" step="1">
 
         <fieldset class="date-select">
           <legend>Log for</legend>
@@ -106,9 +109,12 @@
         {{ today.label }}
         {% if today.calories_burned %}
           <span class="total">{{ today.net_calories }} cal net</span>
-          <span class="calorie-breakdown">{{ today.total_calories }} consumed &minus; {{ today.calories_burned }} burned</span>
         {% else %}
           <span class="total">{{ today.total_calories }} cal</span>
+        {% endif %}
+        <span class="total">&middot; {{ today.total_fiber }} g fiber</span>
+        {% if today.calories_burned %}
+          <span class="calorie-breakdown">{{ today.total_calories }} consumed &minus; {{ today.calories_burned }} burned</span>
         {% endif %}
       </h2>
       {% if today.entries %}
@@ -117,7 +123,7 @@
             <li class="log-entry">
               <div class="log-entry-meta">
                 <span>{{ entry["entry_time"] }}</span>
-                <span class="log-entry-value">{{ entry["calories"] }} cal</span>
+                <span class="log-entry-value">{{ entry["calories"] }} cal <span class="log-entry-fiber">&middot; {{ entry["fiber_grams"] | fiber }}</span></span>
                 <span class="row-actions">
                   <a href="{{ url_for('food_entry_edit_form', item_id=entry['item_id']) }}" aria-label="Edit {{ entry['description'] }}">Edit</a>
                   <form method="post" action="{{ url_for('food_entry_delete', item_id=entry['item_id']) }}" onsubmit="return confirm('Delete this entry?');">
@@ -143,9 +149,12 @@
         {{ yesterday.label }}
         {% if yesterday.calories_burned %}
           <span class="total">{{ yesterday.net_calories }} cal net</span>
-          <span class="calorie-breakdown">{{ yesterday.total_calories }} consumed &minus; {{ yesterday.calories_burned }} burned</span>
         {% else %}
           <span class="total">{{ yesterday.total_calories }} cal</span>
+        {% endif %}
+        <span class="total">&middot; {{ yesterday.total_fiber }} g fiber</span>
+        {% if yesterday.calories_burned %}
+          <span class="calorie-breakdown">{{ yesterday.total_calories }} consumed &minus; {{ yesterday.calories_burned }} burned</span>
         {% endif %}
       </h2>
       {% if yesterday.entries %}
@@ -154,7 +163,7 @@
             <li class="log-entry">
               <div class="log-entry-meta">
                 <span>{{ entry["entry_time"] }}</span>
-                <span class="log-entry-value">{{ entry["calories"] }} cal</span>
+                <span class="log-entry-value">{{ entry["calories"] }} cal <span class="log-entry-fiber">&middot; {{ entry["fiber_grams"] | fiber }}</span></span>
                 <span class="row-actions">
                   <a href="{{ url_for('food_entry_edit_form', item_id=entry['item_id']) }}" aria-label="Edit {{ entry['description'] }}">Edit</a>
                   <form method="post" action="{{ url_for('food_entry_delete', item_id=entry['item_id']) }}" onsubmit="return confirm('Delete this entry?');">

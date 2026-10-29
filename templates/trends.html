@@ -36,4 +36,14 @@
       <p>No calories logged in the last {{ window_days }} days.</p>
     {% endif %}
   </section>
+
+  <section class="sparkline-section" aria-label="Fiber trend">
+    <h2>Fiber</h2>
+    {% if fiber_sparkline %}
+      {{ sparkline_chart(fiber_sparkline, x_axis_start_label, x_axis_end_label) }}
+      <p class="sparkline-caption">{{ fiber_caption }}</p>
+    {% else %}
+      <p>No fiber logged in the last {{ window_days }} days.</p>
+    {% endif %}
+  </section>
 {% endblock %}

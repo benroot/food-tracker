@@ -36,7 +36,10 @@ CREATE TABLE IF NOT EXISTS log_entry_items (
     quantity TEXT,
     calories INTEGER NOT NULL,
     is_estimate INTEGER NOT NULL DEFAULT 0,
-    assumption_note TEXT
+    assumption_note TEXT,
+    -- Whole grams. NULL means unknown (logged before fiber tracking existed,
+    -- or left blank on direct entry) -- deliberately distinct from 0.
+    fiber_grams INTEGER
 );
 
 -- One row per logged exercise activity. Deliberately flat (unlike log_entries/

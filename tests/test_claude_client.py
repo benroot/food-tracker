@@ -14,6 +14,7 @@ TOOL_USE_BLOCK = {
                 "food": "Apple",
                 "quantity": "1 medium",
                 "estimated_calories": 95,
+                "estimated_fiber_grams": 4,
                 "is_estimate": True,
                 "assumption_note": "Assumed 1 medium apple",
             }
@@ -68,6 +69,12 @@ class CallClaudeTests(unittest.TestCase):
         )
         self.assertEqual(kwargs["json"]["system"], claude_client.EXERCISE_SYSTEM_PROMPT)
         self.assertEqual(kwargs["json"]["tools"], [claude_client.LOG_EXERCISE_ENTRY_TOOL])
+
+    def test_food_tool_requires_a_fiber_estimate_per_item(self):
+        item_schema = claude_client.LOG_FOOD_ENTRY_TOOL["input_schema"]["properties"]["items"]["items"]
+        self.assertEqual(item_schema["properties"]["estimated_fiber_grams"]["type"], "integer")
+        self.assertIn("estimated_fiber_grams", item_schema["required"])
+        self.assertIn("fiber", claude_client.SYSTEM_PROMPT)
 
     @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"})
     @patch("claude_client.requests.post")

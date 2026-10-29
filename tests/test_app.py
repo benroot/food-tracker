@@ -26,6 +26,7 @@ TOOL_INPUT_APPLE = {
             "food": "Apple",
             "quantity": "1 medium",
             "estimated_calories": 95,
+            "estimated_fiber_grams": 4,
             "is_estimate": True,
             "assumption_note": "Assumed 1 medium apple",
         }
@@ -1236,6 +1237,232 @@ class SparklineHelperTests(unittest.TestCase):
         result = appmod._sparkline_svg([(0, 100), (29, 200)], window_days=30, min_range=15)
         self.assertEqual(result["axis_min"], 100)
         self.assertEqual(result["axis_max"], 200)
+
+
+def _seed_meal(entry_date, items, entry_time="08:00"):
+    """items: list of (description, calories, fiber_grams) logged as one meal
+    event; fiber_grams may be None (unknown)."""
+    with sqlite3.connect(dbmod.DB_PATH) as conn:
+        entry_id = conn.execute(
+            "INSERT INTO log_entries (entry_date, entry_time) VALUES (?, ?)",
+            (entry_date, entry_time),
+        ).lastrowid
+        for description, calories, fiber_grams in items:
+            conn.execute(
+                "INSERT INTO log_entry_items (log_entry_id, description, calories, fiber_grams) "
+                "VALUES (?, ?, ?, ?)",
+                (entry_id, description, calories, fiber_grams),
+            )
+    return entry_id
+
+
+def _all_fiber():
+    with sqlite3.connect(dbmod.DB_PATH) as conn:
+        return [row[0] for row in conn.execute("SELECT fiber_grams FROM log_entry_items ORDER BY id")]
+
+
+class FiberLoggingTests(FoodTrackerTestCase):
+    @patch("claude_client.call_claude")
+    def test_chat_log_stores_fiber_and_flashes_it(self, mock_call_claude):
+        mock_call_claude.return_value = fake_response(TOOL_INPUT_APPLE)
+
+        response = self.client.post("/food/log", data={"message": "an apple"}, follow_redirects=True)
+
+        self.assertEqual(_all_fiber(), [4])
+        self.assertIn(b"Apple (95 cal, 4 g fiber)", response.data)
+
+    @patch("claude_client.call_claude")
+    def test_chat_log_missing_fiber_is_stored_as_unknown(self, mock_call_claude):
+        mock_call_claude.return_value = fake_response(
+            {
+                "items": [{"food": "Mystery", "estimated_calories": 100, "is_estimate": True}],
+                "needs_clarification": False,
+            }
+        )
+
+        self.client.post("/food/log", data={"message": "something"})
+
+        self.assertEqual(_all_fiber(), [None])
+
+    def test_direct_entry_fiber_is_optional(self):
+        self.client.post("/food/log-direct", data={"food": "Bran", "calories": "120", "fiber": "5"})
+        self.client.post("/food/log-direct", data={"food": "Soda", "calories": "150", "fiber": "0"})
+        self.client.post("/food/log-direct", data={"food": "Bar", "calories": "200", "fiber": ""})
+        self.client.post("/food/log-direct", data={"food": "Gum", "calories": "5"})
+
+        self.assertEqual(_all_fiber(), [5, 0, None, None])
+
+    def test_direct_entry_rejects_invalid_fiber(self):
+        for bad in ("-1", "lots", "2.5"):
+            with self.subTest(fiber=bad):
+                response = self.client.post(
+                    "/food/log-direct",
+                    data={"food": "Bran", "calories": "120", "fiber": bad},
+                    follow_redirects=True,
+                )
+                self.assertIn(b"Fiber must be a whole number", response.data)
+        self.assertEqual(_all_fiber(), [])
+
+    def test_edit_sets_and_clears_fiber(self):
+        _seed_meal(date.today().isoformat(), [("Toast", 100, None)])
+        with sqlite3.connect(dbmod.DB_PATH) as conn:
+            item_id = conn.execute("SELECT id FROM log_entry_items").fetchone()[0]
+
+        response = self.client.post(
+            f"/food/entries/{item_id}/edit",
+            data={"food": "Toast", "calories": "100", "fiber": "3"},
+            follow_redirects=True,
+        )
+        self.assertEqual(_all_fiber(), [3])
+        self.assertIn(b"Toast (100 cal, 3 g fiber)", response.data)
+
+        self.client.post(
+            f"/food/entries/{item_id}/edit", data={"food": "Toast", "calories": "100", "fiber": ""}
+        )
+        self.assertEqual(_all_fiber(), [None])
+
+    def test_edit_rejects_invalid_fiber_without_writing(self):
+        _seed_meal(date.today().isoformat(), [("Toast", 100, 2)])
+        with sqlite3.connect(dbmod.DB_PATH) as conn:
+            item_id = conn.execute("SELECT id FROM log_entry_items").fetchone()[0]
+
+        self.client.post(
+            f"/food/entries/{item_id}/edit", data={"food": "Toast", "calories": "150", "fiber": "-3"}
+        )
+
+        with sqlite3.connect(dbmod.DB_PATH) as conn:
+            self.assertEqual(
+                conn.execute("SELECT calories, fiber_grams FROM log_entry_items").fetchone(), (100, 2)
+            )
+
+    def test_edit_form_prefills_fiber_or_leaves_it_blank(self):
+        _seed_meal(date.today().isoformat(), [("Toast", 100, 3), ("Jam", 50, None)])
+        with sqlite3.connect(dbmod.DB_PATH) as conn:
+            toast_id, jam_id = [r[0] for r in conn.execute("SELECT id FROM log_entry_items ORDER BY id")]
+
+        self.assertIn(b'name="fiber" min="0" step="1" value="3"', self.client.get(f"/food/entries/{toast_id}/edit").data)
+        self.assertIn(b'name="fiber" min="0" step="1" value=""', self.client.get(f"/food/entries/{jam_id}/edit").data)
+
+    def test_repeat_copies_fiber_including_unknown(self):
+        entry_id = _seed_meal("2026-08-20", [("Oatmeal", 200, 4), ("Coffee", 5, None)])
+
+        response = self.client.post(
+            "/food/repeat", data={"entry_id": str(entry_id)}, follow_redirects=True
+        )
+
+        self.assertEqual(_all_fiber(), [4, None, 4, None])
+        self.assertIn(b"Oatmeal (200 cal, 4 g fiber), Coffee (5 cal)", response.data)
+
+
+class FiberDisplayTests(FoodTrackerTestCase):
+    def test_daily_total_counts_unknown_as_zero_and_items_show_fiber(self):
+        _seed_meal(date.today().isoformat(), [("Oatmeal", 200, 4), ("Coffee", 5, None), ("Egg", 70, 0)])
+
+        body = self.client.get("/").get_data(as_text=True)
+
+        self.assertIn("&middot; 4 g fiber</span>", body)
+        self.assertIn("&middot; — fiber</span>", body)
+        self.assertIn("&middot; 0 g fiber</span>", body)
+
+    def test_fiber_total_shown_alongside_net_calories(self):
+        _seed_meal(date.today().isoformat(), [("Oatmeal", 200, 6)])
+        with sqlite3.connect(dbmod.DB_PATH) as conn:
+            conn.execute(
+                "INSERT INTO exercise_log (entry_date, entry_time, activity, calories_burned) "
+                "VALUES (?, '07:00', 'Walk', 50)",
+                (date.today().isoformat(),),
+            )
+
+        body = self.client.get("/").get_data(as_text=True)
+
+        self.assertIn("150 cal net", body)
+        self.assertIn("&middot; 6 g fiber", body)
+
+    def test_repeat_option_shows_fiber_only_when_known(self):
+        _seed_meal("2026-08-20", [("Oatmeal", 200, 4), ("Coffee", 5, None)])
+        _seed_meal("2026-08-21", [("Mystery bar", 250, None)])
+
+        body = self.client.get("/").get_data(as_text=True)
+
+        self.assertIn("Oatmeal, Coffee &mdash; 205 cal, 4 g fiber", body)
+        self.assertIn("Mystery bar &mdash; 250 cal\n", body)
+
+
+class FiberTrendTests(FoodTrackerTestCase):
+    def _trend(self):
+        conn = sqlite3.connect(dbmod.DB_PATH)
+        conn.row_factory = sqlite3.Row
+        try:
+            return appmod._fiber_trend(conn)
+        finally:
+            conn.close()
+
+    def test_only_days_with_known_fiber_are_plotted(self):
+        window_start = date.today() - timedelta(days=29)
+        _seed_meal(window_start.isoformat(), [("Old meal", 500, None)])
+        _seed_meal((window_start + timedelta(days=3)).isoformat(), [("Beans", 200, 8), ("Rice", 200, None)])
+        _seed_meal(date.today().isoformat(), [("Apple", 95, 4)])
+        _seed_meal(date.today().isoformat(), [("Pear", 100, 6)], entry_time="12:00")
+        _seed_meal((window_start - timedelta(days=1)).isoformat(), [("Too old", 100, 9)])
+
+        self.assertEqual(self._trend(), [(3, 8), (29, 10)])
+
+    def test_trends_page_renders_fiber_chart(self):
+        _seed_meal(date.today().isoformat(), [("Apple", 95, 4)])
+
+        body = self.client.get("/trends").get_data(as_text=True)
+
+        self.assertEqual(body.count("<svg"), 2)  # calories + fiber; no weight logged
+        self.assertIn("4 g today", body)
+
+    def test_trends_page_fiber_empty_state(self):
+        _seed_meal(date.today().isoformat(), [("Mystery", 95, None)])
+
+        body = self.client.get("/trends").get_data(as_text=True)
+
+        self.assertIn("No fiber logged in the last 30 days.", body)
+
+    def test_caption_names_the_date_when_latest_fiber_day_is_not_today(self):
+        three_days_ago = date.today() - timedelta(days=3)
+        _seed_meal(three_days_ago.isoformat(), [("Beans", 200, 8)])
+
+        body = self.client.get("/trends").get_data(as_text=True)
+
+        self.assertIn(f"8 g on {three_days_ago.isoformat()}", body)
+
+
+class FiberMigrationTests(unittest.TestCase):
+    def test_adds_nullable_fiber_column_to_a_pre_fiber_database(self):
+        fd, path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        self.addCleanup(os.remove, path)
+        with sqlite3.connect(path) as conn:
+            conn.executescript(
+                """
+                CREATE TABLE log_entries (id INTEGER PRIMARY KEY, entry_date TEXT NOT NULL,
+                    entry_time TEXT NOT NULL, source_bundle_id INTEGER, notes TEXT,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')));
+                CREATE TABLE log_entry_items (id INTEGER PRIMARY KEY, log_entry_id INTEGER NOT NULL,
+                    food_item_id INTEGER, description TEXT NOT NULL, quantity TEXT,
+                    calories INTEGER NOT NULL, is_estimate INTEGER NOT NULL DEFAULT 0,
+                    assumption_note TEXT);
+                INSERT INTO log_entries (entry_date, entry_time) VALUES ('2026-01-01', '08:00');
+                INSERT INTO log_entry_items (log_entry_id, description, calories) VALUES (1, 'Toast', 100);
+                """
+            )
+        conn.close()
+
+        with patch.object(dbmod, "DB_PATH", path):
+            dbmod.init_db()
+            dbmod.init_db()  # second boot is a no-op, not a duplicate-column error
+
+        conn = sqlite3.connect(path)
+        try:
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(log_entry_items)")}
+            self.assertIn("fiber_grams", columns)
+            self.assertEqual(conn.execute("SELECT fiber_grams FROM log_entry_items").fetchone(), (None,))
+        finally:
+            conn.close()
 
 
 class AuthGateTests(FoodTrackerTestCase):

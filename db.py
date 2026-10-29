@@ -30,6 +30,16 @@ def _migrate_schema(db):
     if "meal_type" in columns:
         db.execute("ALTER TABLE log_entries DROP COLUMN meal_type")
 
+    item_columns = {row[1] for row in db.execute("PRAGMA table_info(log_entry_items)")}
+    if "fiber_grams" not in item_columns:
+        # Existing rows get NULL (unknown), not 0 -- see schema.sql.
+        try:
+            db.execute("ALTER TABLE log_entry_items ADD COLUMN fiber_grams INTEGER")
+        except sqlite3.OperationalError as exc:
+            # Another Passenger worker booting at the same moment won the race.
+            if "duplicate column" not in str(exc):
+                raise
+
 
 def init_db():
     with sqlite3.connect(DB_PATH) as db:
