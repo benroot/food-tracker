@@ -1321,6 +1321,22 @@ class AuthGateTests(FoodTrackerTestCase):
         response = self._login("correct-horse", next="/trends")
         self.assertTrue(response.headers["Location"].endswith("/trends"))
 
+    def test_login_redirects_within_mount_prefix(self):
+        """Regression: in production Passenger mounts the app under
+        /food-tracker, and the next path must keep that prefix."""
+        prefixed = "http://localhost/food-tracker/"
+        gate = self.client.get("/trends", base_url=prefixed)
+        self.assertIn("/food-tracker/login?next=/trends", gate.headers["Location"])
+        for next_path, expected in (("/trends", "/food-tracker/trends"), ("/", "/food-tracker/"), ("", "/food-tracker/")):
+            with self.subTest(next=next_path):
+                self._reset_csrf()
+                self.client.post("/logout", base_url=prefixed)
+                self._reset_csrf()
+                response = self.client.post(
+                    "/login", data={"password": "correct-horse", "next": next_path}, base_url=prefixed
+                )
+                self.assertTrue(response.headers["Location"].endswith(expected), response.headers["Location"])
+
     def test_login_ignores_off_site_next(self):
         for evil in ("//evil.example", "https://evil.example", "/\\evil.example"):
             with self.subTest(next=evil):

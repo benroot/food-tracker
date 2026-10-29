@@ -352,8 +352,11 @@ def _auth_template_context():
 def _safe_next_path(raw):
     # Only ever redirect to a local path -- "//host" and "/\host" are
     # protocol-relative URLs browsers will happily follow off-site.
+    # raw is relative to the app (request.full_path excludes the mount
+    # prefix), so re-add script_root -- in production Passenger mounts the
+    # app under /food-tracker, which url_for() adds itself but this doesn't.
     if raw and raw.startswith("/") and not raw.startswith(("//", "/\\")):
-        return raw
+        return request.script_root + raw
     return url_for("food_page")
 
 
