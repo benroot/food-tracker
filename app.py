@@ -4,7 +4,7 @@ import re
 import secrets
 from datetime import date, datetime, timedelta
 
-from flask import Flask, Response, flash, redirect, render_template, request, session, url_for
+from flask import Flask, abort, flash, redirect, render_template, request, session, url_for
 from werkzeug.security import check_password_hash
 
 import claude_client
@@ -23,6 +23,20 @@ _auth_hash_b64 = os.environ.get("AUTH_PASSWORD_HASH")
 AUTH_PASSWORD_HASH = (
     base64.urlsafe_b64decode(_auth_hash_b64).decode() if _auth_hash_b64 else None
 )
+
+# SECRET_KEY signs the session cookie that carries the login. It must be a
+# stable, real secret whenever auth is on -- a per-boot random fallback would
+# log you out on every restart (and disagree across Passenger workers), and
+# silently falling back to one in production would hide a misconfiguration,
+# so refuse to boot instead. With auth off (local dev, tests) a random key is
+# fine: the session only holds transient pending-clarification state.
+SECRET_KEY = os.environ.get("SECRET_KEY")
+if AUTH_PASSWORD_HASH and not SECRET_KEY:
+    raise RuntimeError("AUTH_PASSWORD_HASH is set but SECRET_KEY isn't -- set both.")
+
+SESSION_LIFETIME = timedelta(days=30)
+LOGIN_MAX_FAILURES = 5
+LOGIN_FAILURE_WINDOW_MINUTES = 15
 
 RECENT_OPTIONS_LIMIT = 3
 RECENT_MEAL_MIN_DAYS = 7
@@ -303,27 +317,121 @@ def _sparkline_svg(
 
 
 app = Flask(__name__)
-app.secret_key = secrets.token_hex(32)
+app.secret_key = SECRET_KEY or secrets.token_hex(32)
+app.config.update(
+    # Sliding 30-day login: Flask re-issues a permanent session's cookie (with
+    # a fresh expiry) on every request by default, so regular use never logs
+    # you out -- only 30 days without a visit does.
+    PERMANENT_SESSION_LIFETIME=SESSION_LIFETIME,
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    # Secure whenever auth is on (production is HTTPS-only). ALLOW_INSECURE_COOKIES=1
+    # is an opt-out for trying the login flow over plain http://localhost.
+    SESSION_COOKIE_SECURE=bool(AUTH_PASSWORD_HASH)
+    and os.environ.get("ALLOW_INSECURE_COOKIES") != "1",
+)
 
 app.teardown_appcontext(dbmod.close_db)
 dbmod.init_db()
 
 
+def _csrf_token():
+    if "csrf_token" not in session:
+        session["csrf_token"] = secrets.token_urlsafe(32)
+    return session["csrf_token"]
+
+
+app.jinja_env.globals["csrf_token"] = _csrf_token
+
+
+@app.context_processor
+def _auth_template_context():
+    return {"auth_enabled": bool(AUTH_PASSWORD_HASH)}
+
+
+def _safe_next_path(raw):
+    # Only ever redirect to a local path -- "//host" and "/\host" are
+    # protocol-relative URLs browsers will happily follow off-site.
+    if raw and raw.startswith("/") and not raw.startswith(("//", "/\\")):
+        return raw
+    return url_for("food_page")
+
+
 @app.before_request
-def _require_auth():
+def _require_auth_and_csrf():
     # AUTH_PASSWORD_HASH unset (e.g. local dev, or the test suite, which never
-    # sets it) means the gate is off -- consistent with how ANTHROPIC_API_KEY
-    # is mocked away rather than required in tests. Production must set it.
-    if not AUTH_PASSWORD_HASH:
+    # sets it) means the login gate is off -- consistent with how
+    # ANTHROPIC_API_KEY is mocked away rather than required in tests.
+    # Production must set it. CSRF is checked either way, so a form missing
+    # its token fails locally too, not only once deployed.
+    if request.endpoint == "static":
         return None
-    auth = request.authorization
-    if auth is None or not check_password_hash(AUTH_PASSWORD_HASH, auth.password):
-        return Response(
-            "Authentication required.",
-            401,
-            {"WWW-Authenticate": 'Basic realm="Food Tracker"'},
-        )
+    if (
+        AUTH_PASSWORD_HASH
+        and request.endpoint != "login"
+        and not session.get("authenticated")
+    ):
+        next_path = request.full_path.rstrip("?") if request.method == "GET" else None
+        return redirect(url_for("login", next=next_path))
+    if request.method == "POST":
+        sent = request.form.get("csrf_token", "")
+        expected = session.get("csrf_token", "")
+        if not expected or not secrets.compare_digest(sent, expected):
+            abort(400, "Form expired or invalid -- reload the page and try again.")
     return None
+
+
+def _recent_login_failures(db, ip):
+    return db.execute(
+        "SELECT COUNT(*) FROM login_attempts WHERE ip = ? AND attempted_at > datetime('now', ?)",
+        (ip, f"-{LOGIN_FAILURE_WINDOW_MINUTES} minutes"),
+    ).fetchone()[0]
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if not AUTH_PASSWORD_HASH or session.get("authenticated"):
+        return redirect(url_for("food_page"))
+    next_path = request.values.get("next", "")
+    if request.method == "GET":
+        return render_template("login.html", next_path=next_path)
+
+    db = dbmod.get_db()
+    ip = request.remote_addr or "unknown"
+    # Locked out: refuse without even checking the password, so a guess made
+    # during lockout can't succeed (or reveal anything) and isn't counted.
+    if _recent_login_failures(db, ip) >= LOGIN_MAX_FAILURES:
+        flash(
+            f"Too many failed attempts. Try again in {LOGIN_FAILURE_WINDOW_MINUTES} minutes.",
+            "error",
+        )
+        return render_template("login.html", next_path=next_path), 429
+
+    if not check_password_hash(AUTH_PASSWORD_HASH, request.form.get("password", "")):
+        db.execute(
+            "DELETE FROM login_attempts WHERE attempted_at <= datetime('now', ?)",
+            (f"-{LOGIN_FAILURE_WINDOW_MINUTES} minutes",),
+        )
+        db.execute("INSERT INTO login_attempts (ip) VALUES (?)", (ip,))
+        db.commit()
+        flash("Incorrect password.", "error")
+        return render_template("login.html", next_path=next_path), 401
+
+    db.execute("DELETE FROM login_attempts WHERE ip = ?", (ip,))
+    db.commit()
+    # Fresh session on login, so the pre-login CSRF token doesn't carry over.
+    session.clear()
+    session.permanent = True
+    session["authenticated"] = True
+    return redirect(_safe_next_path(next_path))
+
+
+@app.route("/logout", methods=["POST"])
+def logout():
+    session.clear()
+    if AUTH_PASSWORD_HASH:
+        return redirect(url_for("login"))
+    return redirect(url_for("food_page"))
 
 
 @app.route("/weight", methods=["GET"])

@@ -1,10 +1,12 @@
 import os
+import re
 import sqlite3
 import tempfile
 import unittest
 from datetime import date, timedelta
 from unittest.mock import patch
 
+from flask.testing import FlaskClient
 from werkzeug.security import generate_password_hash
 
 _db_fd, _db_path = tempfile.mkstemp(suffix=".db")
@@ -63,6 +65,21 @@ def fake_response(tool_input, tool_use_id="toolu_test", tool_name="log_food_entr
     }
 
 
+CSRF_TEST_TOKEN = "test-csrf-token"
+
+
+class CsrfClient(FlaskClient):
+    """Test client that sends CSRF_TEST_TOKEN with every POST, so route tests
+    don't each have to scrape a token first. CsrfTests below covers the
+    check itself, and that every rendered POST form actually carries one."""
+
+    def post(self, *args, **kwargs):
+        data = dict(kwargs.get("data") or {})
+        data.setdefault("csrf_token", CSRF_TEST_TOKEN)
+        kwargs["data"] = data
+        return super().post(*args, **kwargs)
+
+
 class FoodTrackerTestCase(unittest.TestCase):
     """Shared setup: fresh tables in the scratch SQLite file before each test."""
 
@@ -71,9 +88,13 @@ class FoodTrackerTestCase(unittest.TestCase):
         with sqlite3.connect(dbmod.DB_PATH) as conn:
             conn.executescript(
                 "DELETE FROM log_entry_items; DELETE FROM log_entries; "
-                "DELETE FROM weight_log; DELETE FROM exercise_log;"
+                "DELETE FROM weight_log; DELETE FROM exercise_log; "
+                "DELETE FROM login_attempts;"
             )
+        appmod.app.test_client_class = CsrfClient
         self.client = appmod.app.test_client()
+        with self.client.session_transaction() as sess:
+            sess["csrf_token"] = CSRF_TEST_TOKEN
 
 
 class ResolveEntryDateTests(unittest.TestCase):
@@ -1219,30 +1240,192 @@ class SparklineHelperTests(unittest.TestCase):
 
 class AuthGateTests(FoodTrackerTestCase):
     """AUTH_PASSWORD_HASH is unset throughout the rest of the suite (same
-    treatment as ANTHROPIC_API_KEY -- never configured in tests), which is
-    itself what test_no_hash_configured_leaves_routes_open below asserts."""
+    treatment as ANTHROPIC_API_KEY -- never configured in tests), so these
+    tests patch it on per-test instead."""
 
-    TEST_HASH = generate_password_hash("correct-horse")
+    TEST_HASH = generate_password_hash("correct-horse", method="pbkdf2:sha256")
+
+    def setUp(self):
+        super().setUp()
+        patcher = patch.object(appmod, "AUTH_PASSWORD_HASH", self.TEST_HASH)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _login(self, password, **extra):
+        return self.client.post("/login", data=dict(password=password, **extra))
+
+    def _reset_csrf(self):
+        # Logging in or out clears the session, CSRF token included.
+        with self.client.session_transaction() as sess:
+            sess["csrf_token"] = CSRF_TEST_TOKEN
+
+    def _failure_count(self):
+        with sqlite3.connect(dbmod.DB_PATH) as conn:
+            return conn.execute("SELECT COUNT(*) FROM login_attempts").fetchone()[0]
 
     def test_no_hash_configured_leaves_routes_open(self):
-        response = self.client.get("/")
-        self.assertEqual(response.status_code, 200)
-
-    def test_missing_credentials_are_rejected_when_hash_is_configured(self):
-        with patch.object(appmod, "AUTH_PASSWORD_HASH", self.TEST_HASH):
+        with patch.object(appmod, "AUTH_PASSWORD_HASH", None):
             response = self.client.get("/")
-        self.assertEqual(response.status_code, 401)
-        self.assertIn("WWW-Authenticate", response.headers)
-
-    def test_wrong_password_is_rejected(self):
-        with patch.object(appmod, "AUTH_PASSWORD_HASH", self.TEST_HASH):
-            response = self.client.get("/", auth=("anyuser", "wrong-password"))
-        self.assertEqual(response.status_code, 401)
-
-    def test_correct_password_is_accepted_regardless_of_username(self):
-        with patch.object(appmod, "AUTH_PASSWORD_HASH", self.TEST_HASH):
-            response = self.client.get("/", auth=("anyuser", "correct-horse"))
         self.assertEqual(response.status_code, 200)
+        self.assertNotIn(b"Log out", response.data)
+
+    def test_unauthenticated_get_redirects_to_login_with_next(self):
+        response = self.client.get("/trends")
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/login?next=/trends", response.headers["Location"])
+
+    def test_unauthenticated_post_redirects_to_login_and_writes_nothing(self):
+        response = self.client.post("/log", data={"weight_lbs": "180"})
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/login", response.headers["Location"])
+        with sqlite3.connect(dbmod.DB_PATH) as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM weight_log").fetchone()[0], 0)
+
+    def test_login_page_renders_without_nav(self):
+        response = self.client.get("/login")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b'type="password"', response.data)
+        self.assertNotIn(b'aria-label="Main"', response.data)
+
+    def test_static_files_are_reachable_without_login(self):
+        response = self.client.get("/static/style.css")
+        self.assertEqual(response.status_code, 200)
+        response.close()
+
+    def test_wrong_password_is_rejected_and_counted(self):
+        response = self._login("wrong-password")
+        self.assertEqual(response.status_code, 401)
+        self.assertIn(b"Incorrect password", response.data)
+        self.assertEqual(self._failure_count(), 1)
+        self.assertEqual(self.client.get("/").status_code, 302)
+
+    def test_correct_password_logs_in_with_permanent_session(self):
+        response = self._login("correct-horse")
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response.headers["Location"].endswith("/"))
+        with self.client.session_transaction() as sess:
+            self.assertTrue(sess["authenticated"])
+            self.assertTrue(sess.permanent)
+        page = self.client.get("/")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(b"Log out", page.data)
+
+    def test_session_cookie_has_expiry_and_security_flags(self):
+        response = self._login("correct-horse")
+        cookie = response.headers["Set-Cookie"]
+        self.assertIn("Expires=", cookie)
+        self.assertIn("HttpOnly", cookie)
+        self.assertIn("SameSite=Lax", cookie)
+
+    def test_login_redirects_to_safe_next_path(self):
+        response = self._login("correct-horse", next="/trends")
+        self.assertTrue(response.headers["Location"].endswith("/trends"))
+
+    def test_login_ignores_off_site_next(self):
+        for evil in ("//evil.example", "https://evil.example", "/\\evil.example"):
+            with self.subTest(next=evil):
+                self._reset_csrf()
+                self.client.post("/logout")
+                self._reset_csrf()
+                response = self._login("correct-horse", next=evil)
+                self.assertNotIn("evil", response.headers["Location"])
+
+    def test_successful_login_clears_that_ips_failures(self):
+        self._login("wrong-password")
+        self._login("wrong-password")
+        self._login("correct-horse")
+        self.assertEqual(self._failure_count(), 0)
+
+    def test_lockout_after_max_failures_blocks_even_correct_password(self):
+        for _ in range(appmod.LOGIN_MAX_FAILURES):
+            self._login("wrong-password")
+        response = self._login("correct-horse")
+        self.assertEqual(response.status_code, 429)
+        self.assertIn(b"Too many failed attempts", response.data)
+        self.assertEqual(self._failure_count(), appmod.LOGIN_MAX_FAILURES)
+        with self.client.session_transaction() as sess:
+            self.assertNotIn("authenticated", sess)
+
+    def test_lockout_is_per_ip(self):
+        for _ in range(appmod.LOGIN_MAX_FAILURES):
+            self._login("wrong-password")
+        response = self.client.post(
+            "/login",
+            data={"password": "correct-horse"},
+            environ_base={"REMOTE_ADDR": "10.0.0.2"},
+        )
+        self.assertEqual(response.status_code, 302)
+
+    def test_failures_older_than_window_dont_count(self):
+        with sqlite3.connect(dbmod.DB_PATH) as conn:
+            conn.executemany(
+                "INSERT INTO login_attempts (ip, attempted_at) VALUES ('127.0.0.1', datetime('now', ?))",
+                [(f"-{appmod.LOGIN_FAILURE_WINDOW_MINUTES + 1} minutes",)] * appmod.LOGIN_MAX_FAILURES,
+            )
+        response = self._login("correct-horse")
+        self.assertEqual(response.status_code, 302)
+
+    def test_logout_clears_session(self):
+        self._login("correct-horse")
+        self._reset_csrf()
+        response = self.client.post("/logout")
+        self.assertIn("/login", response.headers["Location"])
+        self.assertEqual(self.client.get("/").status_code, 302)
+
+
+class CsrfTests(FoodTrackerTestCase):
+    def test_post_with_blank_token_is_rejected(self):
+        response = self.client.post("/log", data={"weight_lbs": "180", "csrf_token": ""})
+        self.assertEqual(response.status_code, 400)
+        with sqlite3.connect(dbmod.DB_PATH) as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM weight_log").fetchone()[0], 0)
+
+    def test_post_with_wrong_token_is_rejected(self):
+        response = self.client.post("/log", data={"weight_lbs": "180", "csrf_token": "nope"})
+        self.assertEqual(response.status_code, 400)
+
+    def test_post_with_no_session_token_is_rejected(self):
+        with self.client.session_transaction() as sess:
+            sess.pop("csrf_token")
+        response = self.client.post("/log", data={"weight_lbs": "180"})
+        self.assertEqual(response.status_code, 400)
+
+    def test_login_post_requires_token(self):
+        test_hash = generate_password_hash("pw", method="pbkdf2:sha256")
+        with patch.object(appmod, "AUTH_PASSWORD_HASH", test_hash):
+            response = self.client.post("/login", data={"password": "pw", "csrf_token": ""})
+        self.assertEqual(response.status_code, 400)
+
+    def test_every_rendered_post_form_carries_the_session_token(self):
+        """Guards against a new form being added without the hidden input --
+        which would otherwise only show up as a 400 in real use."""
+        with sqlite3.connect(dbmod.DB_PATH) as conn:
+            cur = conn.execute(
+                "INSERT INTO log_entries (entry_date, entry_time) VALUES (?, '08:00')",
+                (date.today().isoformat(),),
+            )
+            item_id = conn.execute(
+                "INSERT INTO log_entry_items (log_entry_id, description, calories) VALUES (?, 'Toast', 100)",
+                (cur.lastrowid,),
+            ).lastrowid
+            exercise_id = conn.execute(
+                "INSERT INTO exercise_log (entry_date, entry_time, activity, calories_burned) "
+                "VALUES (?, '07:00', 'Walk', 100)",
+                (date.today().isoformat(),),
+            ).lastrowid
+
+        pages = ["/", "/exercise", "/weight", f"/food/entries/{item_id}/edit",
+                 f"/exercise/entries/{exercise_id}/edit"]
+        # Auth on (and already logged in) so the nav's logout form renders too.
+        with patch.object(appmod, "AUTH_PASSWORD_HASH", "unused"):
+            with self.client.session_transaction() as sess:
+                sess["authenticated"] = True
+            for path in pages:
+                html = self.client.get(path).get_data(as_text=True)
+                forms = re.findall(r'<form method="post".*?</form>', html, re.S)
+                self.assertGreater(len(forms), 1, path)
+                for form in forms:
+                    self.assertIn(f'name="csrf_token" value="{CSRF_TEST_TOKEN}"', form, path)
 
 
 if __name__ == "__main__":

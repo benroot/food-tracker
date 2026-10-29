@@ -20,6 +20,7 @@
 
     <section class="tab-panel" id="panel-chat" aria-label="Chat">
       <form method="post" action="{{ url_for('exercise_log') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <label for="message">
           {% if pending_question %}Your answer{% else %}What did you do?{% endif %}
         </label>
@@ -44,6 +45,7 @@
       <h2>Repeat a previous activity</h2>
       {% if repeat_options %}
         <form method="post" action="{{ url_for('exercise_repeat') }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <label for="repeat_time">Log at time (optional)</label>
           <input type="time" id="repeat_time" name="entry_time">
 
@@ -72,6 +74,7 @@
     <section class="tab-panel" id="panel-direct" aria-label="Log directly">
       <h2>Log directly</h2>
       <form method="post" action="{{ url_for('exercise_log_direct') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <label for="activity">Activity</label>
         <input type="text" id="activity" name="activity" required>
 
@@ -110,6 +113,7 @@
                 <span class="row-actions">
                   <a href="{{ url_for('exercise_entry_edit_form', entry_id=entry['id']) }}" aria-label="Edit {{ entry['activity'] }}">Edit</a>
                   <form method="post" action="{{ url_for('exercise_entry_delete', entry_id=entry['id']) }}" onsubmit="return confirm('Delete this entry?');">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button type="submit" aria-label="Delete {{ entry['activity'] }}">Delete</button>
                   </form>
                 </span>
@@ -135,6 +139,7 @@
                 <span class="row-actions">
                   <a href="{{ url_for('exercise_entry_edit_form', entry_id=entry['id']) }}" aria-label="Edit {{ entry['activity'] }}">Edit</a>
                   <form method="post" action="{{ url_for('exercise_entry_delete', entry_id=entry['id']) }}" onsubmit="return confirm('Delete this entry?');">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button type="submit" aria-label="Delete {{ entry['activity'] }}">Delete</button>
                   </form>
                 </span>

@@ -4,6 +4,7 @@
   <h1>Edit entry</h1>
 
   <form method="post" action="{{ url_for('exercise_entry_edit', entry_id=entry['id']) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <label for="activity">Activity</label>
     <input type="text" id="activity" name="activity" value="{{ entry['activity'] }}" required>
 

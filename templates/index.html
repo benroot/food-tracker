@@ -4,6 +4,7 @@
   <h1>Weight Log</h1>
 
   <form method="post" action="{{ url_for('log_weight') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <label for="weight_lbs">Today's weight (lbs)</label>
     <input
       type="number"

@@ -3,9 +3,9 @@ AUTH_PASSWORD_HASH value, entirely locally -- no server, no cPanel, no HTTP.
 
 Useful when the login gate rejects a password you're sure is right: paste in
 the exact base64 value you put in cPanel (or that generate_password_hash.py
-just printed) and the password you're typing into the browser prompt, and see
+just printed) and the password you're typing into the login page, and see
 whether Werkzeug itself considers them a match -- the same base64-decode +
-check_password_hash steps app.py performs on every request.
+check_password_hash steps app.py performs on every login attempt.
 
     python verify_password_hash.py
 """

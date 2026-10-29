@@ -6,10 +6,16 @@ Run locally whenever you want to set or change the login password:
 
 Paste the printed value into .env (local) and cPanel's Setup Python App
 environment-variable UI (production) as AUTH_PASSWORD_HASH, then restart
-the app. The plaintext password is never written anywhere.
+the app. The plaintext password is never written anywhere. Changing it
+doesn't log out existing sessions -- rotate SECRET_KEY too if you want that.
+
+SECRET_KEY (also required whenever AUTH_PASSWORD_HASH is set) is just a
+random string, no hashing involved:
+
+    python -c "import secrets; print(secrets.token_hex(32))"
 
 The printed value is the real password hash, base64-encoded -- not the raw
-scrypt:... string. cPanel's Setup Python App env-var pipeline was found to
+pbkdf2:sha256:... string. cPanel's Setup Python App env-var pipeline was found to
 corrupt the raw form: something in it shell-interpolates the $salt$hash
 portion as variable references, silently dropping whatever's between the $
 delimiters. Base64's alphabet has no $, so there's nothing left to mangle.

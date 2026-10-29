@@ -37,6 +37,27 @@ nav a:focus-visible {
   text-decoration: underline;
 }
 
+.nav-logout {
+  margin: 0 0 0 auto;
+}
+
+/* Looks like the nav links beside it, but stays a real POST button
+   (logging out changes state, so it can't be a plain link). */
+.nav-logout button {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.nav-logout button:hover,
+.nav-logout button:focus-visible {
+  text-decoration: underline;
+}
+
 .flashes {
   list-style: none;
   padding: 0;

@@ -52,3 +52,13 @@ CREATE TABLE IF NOT EXISTS exercise_log (
     assumption_note TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- Failed login attempts, for per-IP brute-force lockout (see Authentication
+-- in CLAUDE.md). Rows older than the lockout window are pruned on each new
+-- failure, and an IP's rows are cleared on a successful login, so this stays
+-- tiny. attempted_at is UTC (SQLite's datetime('now')).
+CREATE TABLE IF NOT EXISTS login_attempts (
+    id INTEGER PRIMARY KEY,
+    ip TEXT NOT NULL,
+    attempted_at TEXT NOT NULL DEFAULT (datetime('now'))
+);

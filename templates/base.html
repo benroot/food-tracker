@@ -13,12 +13,20 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
+  {% block nav %}
   <nav aria-label="Main">
     <a href="{{ url_for('food_page') }}">Food</a>
     <a href="{{ url_for('exercise_page') }}">Exercise</a>
     <a href="{{ url_for('index') }}">Weight</a>
     <a href="{{ url_for('trends_page') }}">Trends</a>
+    {% if auth_enabled %}
+      <form method="post" action="{{ url_for('logout') }}" class="nav-logout">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit">Log out</button>
+      </form>
+    {% endif %}
   </nav>
+  {% endblock %}
   <main>
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}

@@ -4,6 +4,7 @@
   <h1>Edit entry</h1>
 
   <form method="post" action="{{ url_for('food_entry_edit', item_id=entry['item_id']) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <label for="food">Food</label>
     <input type="text" id="food" name="food" value="{{ entry['description'] }}" required>
 
